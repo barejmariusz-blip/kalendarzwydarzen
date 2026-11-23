@@ -630,6 +630,8 @@ let syncing = false;
 const busy = new Set();
 async function syncOne(sub){
   busy.add(sub.id); if (tab === 'subs') render();
+  // Ślad: które źródło jest właśnie pobierane — jeśli apka padnie, przy starcie wiadomo co wstrzymać
+  try{ localStorage.setItem('kw-syncing', JSON.stringify({id:sub.id, name:sub.name, t:Date.now()})); }catch(_){}
   try{
     const list = await Sources[sub.src](sub);
     if (S.set.pl) await plAnnotate(sub, list);
@@ -647,7 +649,7 @@ async function syncOne(sub){
     }
     sub.lastOk = Date.now(); sub.err = ''; return true;
   }catch(err){ sub.err = String(err.message || err); return false; }   // stare wydarzenia zostają
-  finally{ busy.delete(sub.id); }
+  finally{ busy.delete(sub.id); try{ localStorage.removeItem('kw-syncing'); }catch(_){} }
 }
 function afterSync(){
   for (const k of Object.keys(S.events)) if (S.events[k].end < Date.now() - 30*DAY) delete S.events[k];
@@ -1122,24 +1124,35 @@ $('#plBtn').onclick = () => {
 };
 window.onNativeResume = () => { S = migrate(load()); if (Date.now() - S.set.lastSync > 3*36e5 && S.subs.length) syncAll(); else { render(); checkLineups(); } };
 
+/* Bezpiecznik: apka padła w trakcie pobierania źródła → wstrzymaj to źródło, nie pobieraj automatycznie */
+let CRASHED = null;
+try{
+  CRASHED = JSON.parse(localStorage.getItem('kw-syncing') || 'null');
+  if (CRASHED){
+    localStorage.removeItem('kw-syncing');
+    const bad = S.subs.find(x => x.id === CRASHED.id);
+    if (bad){ bad.on = false; bad.err = 'Wstrzymane: apka padła przy pobieraniu tego źródła'; save(); }
+  }
+}catch(_){}
+const SAFE = !!CRASHED || /[?&]safe=1/.test(location.search);
 if (BG){
   // Synchronizacja w tle (BgSync.java): bez UI, na koniec raport do strony natywnej
   (async () => {
-    try{ if (S.subs.length) await syncAll(false); else await checkLineups(true); }catch(_){}
+    try{ if (SAFE) {} else if (S.subs.length) await syncAll(false); else await checkLineups(true); }catch(_){}
     if (window.Android && Android.bgDone) Android.bgDone();
   })();
 } else {
   render();
   // Ostatni błąd aplikacji (zapisany przy awarii) — do przekazania
   try{
-    const crash = window.Android && Android.lastCrash ? Android.lastCrash() : '';
+    const crash = (window.Android && Android.lastCrash ? Android.lastCrash() : '') + (CRASHED ? '\nPadło podczas pobierania: ' + CRASHED.name + ' (źródło wstrzymane — wznowisz je w Obserwowane)' : '');
     if (crash) sheet(`<h2>⚠ Apka została ostatnio zamknięta przez błąd</h2>
       <p><small>Skopiuj i wyślij, żeby dało się to naprawić:</small></p>
       <textarea readonly style="height:220px;font:11px monospace">${esc(crash)}</textarea>
       <div class="row" style="margin-top:10px"><button class="btn acc" onclick="closeSheet()">OK</button></div>`);
   }catch(_){}
   if (window.Android && Android.notifyState && Android.notifyState() === 'ask') Android.askNotify();
-  if (S.subs.length && Date.now() - S.set.lastSync > 3*36e5) syncAll();
+  if (!SAFE && S.subs.length && Date.now() - S.set.lastSync > 3*36e5) setTimeout(() => syncAll(), 1500);
 }
 </script>
 </body>

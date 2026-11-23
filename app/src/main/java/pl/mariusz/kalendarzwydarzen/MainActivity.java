@@ -39,6 +39,7 @@ public class MainActivity extends Activity {
     private static final int NOTIF_REQ = 43;
 
     private WebView web;
+    private static long lastGone = 0;
     private ValueCallback<Uri[]> fileCallback;
     private final ExecutorService net = Executors.newFixedThreadPool(3);
 
@@ -47,7 +48,7 @@ public class MainActivity extends Activity {
         super.onCreate(state);
         Net.installCrashLog(this);
         Alarms.channels(this);
-        BgSync.schedule(this);
+        try { BgSync.schedule(this); } catch (Throwable t) { Net.note(this, "BgSync.schedule: " + t); }
 
         web = new WebView(this);
         web.setBackgroundColor(0xFF0B0D12);
@@ -67,7 +68,10 @@ public class MainActivity extends Activity {
                 Net.note(MainActivity.this, "WebView renderer gone (crash=" + detail.didCrash() + ")");
                 try { ((android.view.ViewGroup) view.getParent()).removeView(view); view.destroy(); } catch (Throwable ignored) { }
                 web = null;
-                recreate();
+                long now = System.currentTimeMillis();
+                if (now - lastGone < 20000) { finish(); return true; }   // drugi raz pod rząd — nie zapętlaj
+                lastGone = now;
+                recreate();   // strona przy starcie sama wstrzyma źródło, przy którym padło
                 return true;
             }
 
