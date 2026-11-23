@@ -79,14 +79,26 @@ const COLORS = ['#ff8a5b','#4cd6a0','#5b9dff','#ffd25b','#c77dff','#ff5c8a','#5b
 /* ---------- Katalog źródeł ESPN (bez klucza, nieoficjalne API) ---------- */
 const ESPN = [
   {g:'Walki', n:'UFC', p:'mma/ufc'},
+  {g:'Walki', n:'KSW', src:'tsdbs', id:'4709'},
   {g:'Motorsport', n:'Formuła 1', p:'racing/f1'},
+  {g:'Motorsport', n:'MotoGP', src:'tsdbr', id:'4407', rounds:22, yearly:true},
+  {g:'Motorsport', n:'IndyCar', p:'racing/irl'},
   {g:'Piłka nożna', n:'Ekstraklasa', src:'tsdbr', id:'4422', rounds:34},
   {g:'Piłka nożna', n:'Bundesliga', p:'soccer/ger.1'},
   {g:'Piłka nożna', n:'Premier League', p:'soccer/eng.1'},
   {g:'Piłka nożna', n:'La Liga', p:'soccer/esp.1'},
   {g:'Piłka nożna', n:'Serie A', p:'soccer/ita.1'},
+  {g:'Piłka nożna', n:'Ligue 1', p:'soccer/fra.1'},
+  {g:'Piłka nożna', n:'Eredivisie', p:'soccer/ned.1'},
   {g:'Piłka nożna', n:'Liga Mistrzów', p:'soccer/uefa.champions'},
   {g:'Piłka nożna', n:'Liga Europy', p:'soccer/uefa.europa'},
+  {g:'Piłka nożna', n:'Liga Konferencji', p:'soccer/uefa.europa.conf'},
+  {g:'Reprezentacje', n:'Liga Narodów', p:'soccer/uefa.nations'},
+  {g:'Reprezentacje', n:'Mecze towarzyskie', p:'soccer/fifa.friendly'},
+  {g:'Siatkówka', n:'PlusLiga', src:'tsdbr', id:'5619', rounds:26},
+  {g:'Piłka ręczna', n:'Liga Mistrzów EHF', src:'tsdbr', id:'4980', rounds:14},
+  {g:'Tenis', n:'ATP', p:'tennis/atp'},
+  {g:'Tenis', n:'WTA', p:'tennis/wta'},
   {g:'Koszykówka', n:'NBA', p:'basketball/nba'},
   {g:'Hokej', n:'NHL', p:'hockey/nhl'},
   {g:'Futbol amer.', n:'NFL', p:'football/nfl'}
@@ -151,6 +163,16 @@ const Sources = {
       const j = await getJSON(`${base}/teams/${sub.team}/schedule?fixture=true`);
       return (j.events || []).map(map);
     }
+    // Tenis: event = cały turniej, ESPN oddaje bieżący → co 3 dni
+    if (/^tennis\//.test(sub.ref)){
+      const out = {}; let okDays = 0;
+      for (let i = 0; i < Math.min(S.set.horizon, 60); i += 3){
+        try{ const j = await getJSON(`${base}/scoreboard?dates=${ymd(new Date(Date.now() + i*DAY))}`); okDays++;
+          (j.events || []).forEach(e => { const m = map(e); m.allDay = true; if (e.endDate) m.end = Date.parse(e.endDate); out[e.id] = m; }); }catch(_){}
+      }
+      if (!okDays) throw new Error('ESPN nie odpowiada dla ' + sub.ref);
+      return Object.values(out);
+    }
     // Gale i wyścigi: zakres dat działa
     if (/^(mma|racing)\//.test(sub.ref)){
       const from = new Date(Date.now() - DAY), to = new Date(Date.now() + S.set.horizon*DAY);
@@ -178,30 +200,55 @@ const Sources = {
   },
   /* TheSportsDB po kolejkach: darmowy klucz oddaje pełną kolejkę (np. Ekstraklasa) */
   async tsdbr(sub){
-    const k = S.set.tsdbKey || '123', now = Date.now(), d = new Date();
-    const y = d.getFullYear(), season = d.getMonth() >= 6 ? `${y}-${y+1}` : `${y-1}-${y}`;
-    const cache = {}, ck = r => sub.ref + '|' + season + '|' + r;
-    const round = async r => {
-      if (cache[r]) return cache[r];
-      const hit = ROUND_CACHE[ck(r)]; if (hit && Date.now() - hit.t < 6e5) return cache[r] = hit.v;
-      await sleep(2100); // limit ~30 zapytań/min
-      const j = await getJSON(`https://www.thesportsdb.com/api/v1/json/${encodeURIComponent(k)}/eventsround.php?id=${sub.ref}&r=${r}&s=${season}`);
-      cache[r] = (j.events || []).map(e => {
+    const k = S.set.tsdbKey || '123', now = Date.now(), d = new Date(), y = d.getFullYear();
+    // Sezony do sprawdzenia: bieżący, a jak w całości rozegrany — następny
+    const seasons = sub.yearly ? [`${y}`, `${y+1}`] : (d.getMonth() >= 6 ? [`${y}-${y+1}`] : [`${y-1}-${y}`, `${y}-${y+1}`]);
+    const max = sub.rounds || 34, allSeen = [];
+    for (const season of seasons){
+      const cache = {}, ck = r => sub.ref + '|' + season + '|' + r;
+      const round = async r => {
+        if (cache[r]) return cache[r];
+        const hit = ROUND_CACHE[ck(r)]; if (hit && Date.now() - hit.t < 6e5) return cache[r] = hit.v;
+        await sleep(2100); // limit ~30 zapytań/min
+        const j = await getJSON(`https://www.thesportsdb.com/api/v1/json/${encodeURIComponent(k)}/eventsround.php?id=${sub.ref}&r=${r}&s=${season}`);
+        cache[r] = (j.events || []).map(e => {
+          const ts = e.strTimestamp ? Date.parse(e.strTimestamp.replace(' ','T') + (/[zZ+]/.test(e.strTimestamp) ? '' : 'Z'))
+                   : Date.parse(e.dateEvent + 'T' + (e.strTime || '00:00:00') + 'Z');
+          const noTime = /T00:00:00/.test(e.strTimestamp || '') || !e.strTime || e.strTime === '00:00:00';
+          return {id:'tsdb:'+e.idEvent, title:e.strEvent, start:ts, end:ts + (noTime ? DAY : 2*36e5), allDay:noTime,
+                  loc:[e.strVenue, e.strCity].filter(Boolean).join(', '),
+                  info:(sub.yearly ? 'Runda ' : 'Kolejka ') + r + (e.strTVStation ? ' · TV: ' + e.strTVStation : ''), url:''};
+        });
+        ROUND_CACHE[ck(r)] = {t:Date.now(), v:cache[r]};
+        return cache[r];
+      };
+      const done = evs => evs.length && evs.every(e => e.end < now);
+      // Szukanie binarne pierwszej kolejki, która nie jest jeszcze w całości rozegrana
+      let lo = 1, hi = max;
+      while (lo < hi){ const mid = (lo + hi) >> 1; if (done(await round(mid))) lo = mid + 1; else hi = mid; }
+      const out = [];
+      for (let r = lo; r <= Math.min(lo + 5, max); r++) out.push(...await round(r));
+      allSeen.push(...Object.values(cache).flat());
+      if (out.some(e => e.end > now)){
+        sub.teams = [...new Set(allSeen.flatMap(e => e.title.split(' vs ')))].filter(t => !/ (GP|Race)$/.test(t)).sort((a,b) => a.localeCompare(b, 'pl'));
+        return out;
+      }
+    }
+    return [];
+  },
+  /* TheSportsDB cały sezon (darmowo max ~15 wydarzeń — wystarcza dla gal, np. KSW ~12/rok) */
+  async tsdbs(sub){
+    const k = S.set.tsdbKey || '123', y = new Date().getFullYear(), out = [];
+    for (const season of [`${y}`, `${y+1}`]){
+      await sleep(1200);
+      const j = await getJSON(`https://www.thesportsdb.com/api/v1/json/${encodeURIComponent(k)}/eventsseason.php?id=${sub.ref}&s=${season}`);
+      for (const e of (j.events || [])){
         const ts = e.strTimestamp ? Date.parse(e.strTimestamp.replace(' ','T') + (/[zZ+]/.test(e.strTimestamp) ? '' : 'Z'))
                  : Date.parse(e.dateEvent + 'T' + (e.strTime || '00:00:00') + 'Z');
-        return {id:'tsdb:'+e.idEvent, title:e.strEvent, start:ts, end:ts + 2*36e5, allDay:!e.strTime || e.strTime === '00:00:00',
-                loc:[e.strVenue, e.strCity].filter(Boolean).join(', '), info:'Kolejka ' + r + (e.strTVStation ? ' · TV: ' + e.strTVStation : ''), url:''};
-      });
-      ROUND_CACHE[ck(r)] = {t:Date.now(), v:cache[r]};
-      return cache[r];
-    };
-    const done = evs => evs.length && evs.every(e => e.end < now);
-    // Szukanie binarne pierwszej kolejki, która nie jest jeszcze w całości rozegrana
-    let lo = 1, hi = sub.rounds || 34;
-    while (lo < hi){ const mid = (lo + hi) >> 1; if (done(await round(mid))) lo = mid + 1; else hi = mid; }
-    const out = [];
-    for (let r = lo; r <= Math.min(lo + 5, sub.rounds || 34); r++) out.push(...await round(r));
-    sub.teams = [...new Set(Object.values(cache).flat().flatMap(e => e.title.split(' vs ')))].sort((a,b) => a.localeCompare(b, 'pl'));
+        out.push({id:'tsdb:'+e.idEvent, title:e.strEvent, start:ts, end:ts + 5*36e5, allDay:false,
+                  loc:[e.strVenue, e.strCity, e.strCountry].filter(Boolean).join(', '), info:e.strTVStation ? 'TV: ' + e.strTVStation : '', url:''});
+      }
+    }
     return out;
   },
   async ics(sub){
@@ -396,7 +443,7 @@ function vCalendar(){
 
 function vSubs(){
   const cnt = id => Object.values(S.events).filter(e => e.sub === id && e.end > Date.now()).length;
-  const SRC = {espn:'ESPN', tsdb:'TheSportsDB', tsdbr:'TheSportsDB', ics:'Kalendarz ICS', manual:'Ręczne'};
+  const SRC = {espn:'ESPN', tsdb:'TheSportsDB', tsdbr:'TheSportsDB', tsdbs:'TheSportsDB', ics:'Kalendarz ICS', manual:'Ręczne'};
   $('#view').innerHTML = `<button class="btn acc" style="width:100%;margin-bottom:12px" onclick="openAdd()">+ Dodaj co obserwować</button>` +
     (S.subs.map(s => `<div class="card" data-sub="${s.id}">
       <div class="row"><span style="width:12px;height:12px;border-radius:50%;background:${s.color}"></span>
@@ -475,14 +522,15 @@ function openEvent(key){
 function openAdd(){
   sheet(`<h2>Co obserwować?</h2>
     <label>Gotowe ligi i federacje</label>
-    <div class="chips" id="espnChips">${ESPN.map((x,i) => `<button class="chip" data-i="${i}">${esc(x.n)}</button>`).join('')}</div>
+    <div id="espnChips">${[...new Set(ESPN.map(x => x.g))].map(g => `<div style="color:var(--mut);font-size:12px;margin:10px 0 5px">${g}</div>
+      <div class="chips">${ESPN.map((x,i) => x.g === g ? `<button class="chip" data-i="${i}">${esc(x.n)}</button>` : '').join('')}</div>`).join('')}</div>
     <label>Filtr (opcjonalnie): drużyna, zawodnik, słowa po przecinku</label>
     <input id="flt" placeholder="np. Bayern, Legia  albo  Prochazka">
     <div class="row" style="margin-top:16px;border-top:1px solid var(--line);padding-top:12px">
       <button class="btn sm" id="aIcs">+ Kalendarz ICS (link)</button>
       <button class="btn sm" id="aTsdb">+ TheSportsDB (ID)</button>
       <button class="btn sm" id="aMan">+ Wpisz ręcznie</button></div>
-    <p><small>ICS działa z każdym kalendarzem online: federacje, kluby, publiczne kalendarze Google. Tak dodasz np. KSW czy galę bokserską, których nie ma w ESPN.</small></p>`);
+    <p><small>ICS działa z każdym kalendarzem online: federacje, kluby, publiczne kalendarze Google. Tak dodasz np. skoki narciarskie (FIS → „Selected calendar (ICS)” → Copy URL) albo gale bokserskie.</small></p>`);
   $('#espnChips').onclick = ev => { const b = ev.target.closest('[data-i]'); if (!b) return; openLeague(ESPN[+b.dataset.i], $('#flt').value.trim()); };
   $('#aIcs').onclick = () => form('Kalendarz ICS', [['name','Nazwa','np. KSW'],['ref','Link .ics / webcal://','https://…'],['filter','Filtr (opcjonalnie)','']],
     v => addSub({src:'ics', ...v}));
@@ -510,8 +558,10 @@ function openRounds(x, flt){
   if ($('#tOk')) $('#tOk').onclick = () => { const v = $('#tq').value.trim(); if (v) mk(v + ' (' + x.n + ')', v); };
 }
 async function openLeague(x, flt){
+  if (x.src === 'tsdbs') return addSub({src:'tsdbs', ref:x.id, name:x.n + (flt ? ' · ' + flt : ''), filter:flt});
+  if (x.src === 'tsdbr' && x.yearly) return addSub({src:'tsdbr', ref:x.id, rounds:x.rounds, yearly:true, name:x.n + (flt ? ' · ' + flt : ''), filter:flt});
   if (x.src === 'tsdbr') return openRounds(x, flt);
-  const solo = /^(mma|racing)\//.test(x.p);
+  const solo = /^(mma|racing|tennis)\//.test(x.p);
   sheet(`<h2>${esc(x.n)}</h2>
     <button class="btn acc" id="lAll" style="width:100%">Cała ${solo ? 'federacja / seria' : 'liga'}${flt ? ' · filtr: ' + esc(flt) : ''}</button>
     ${solo ? '' : `<label>…albo konkretna drużyna (pełny terminarz)</label><input id="tq" placeholder="Szukaj drużyny"><div class="chips" id="tl" style="margin-top:8px"><small>Ładuję drużyny…</small></div>`}
