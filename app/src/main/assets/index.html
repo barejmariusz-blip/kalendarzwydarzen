@@ -105,6 +105,7 @@ function load(){
   return {v:1, subs:[], events:{}, flags:{}, set:{remind:[1440,60,0], tsdbKey:'123', horizon:60, lastSync:0}};
 }
 function save(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){ toast('Brak miejsca na dane'); } }
+const ROUND_CACHE = {};
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const uid = () => Math.random().toString(36).slice(2,9);
 
@@ -118,10 +119,18 @@ function http(url){
   }
   return fetch(url).then(r => r.text().then(b => ({status:r.status, body:b}))).catch(e => ({status:0, body:String(e)}));
 }
+// Ponawia przy limicie (429), błędzie serwera (5xx) i braku sieci: 3 próby z rosnącą przerwą
 async function getJSON(url){
-  const r = await http(url);
-  if (r.status < 200 || r.status >= 300) throw new Error('HTTP ' + r.status);
-  return JSON.parse(r.body);
+  let r;
+  for (let a = 0; a < 3; a++){
+    r = await http(url);
+    if (r.status >= 200 && r.status < 300){
+      try{ return JSON.parse(r.body); }catch(_){ r = {status:-1}; }
+    }
+    if (r.status >= 400 && r.status < 500 && r.status !== 429) break;
+    await sleep(r.status === 429 ? 6000 * (a + 1) : 1500 * (a + 1));
+  }
+  throw new Error(r.status === 0 ? 'brak połączenia' : r.status === 429 ? 'za dużo zapytań, spróbuj za chwilę' : r.status === -1 ? 'zła odpowiedź serwera' : 'HTTP ' + r.status);
 }
 
 /* ---------- Adaptery źródeł: każdy zwraca [{id,title,start,end,allDay,loc,info,url}] ---------- */
@@ -171,17 +180,20 @@ const Sources = {
   async tsdbr(sub){
     const k = S.set.tsdbKey || '123', now = Date.now(), d = new Date();
     const y = d.getFullYear(), season = d.getMonth() >= 6 ? `${y}-${y+1}` : `${y-1}-${y}`;
-    const cache = {};
+    const cache = {}, ck = r => sub.ref + '|' + season + '|' + r;
     const round = async r => {
       if (cache[r]) return cache[r];
+      const hit = ROUND_CACHE[ck(r)]; if (hit && Date.now() - hit.t < 6e5) return cache[r] = hit.v;
       await sleep(2100); // limit ~30 zapytań/min
       const j = await getJSON(`https://www.thesportsdb.com/api/v1/json/${encodeURIComponent(k)}/eventsround.php?id=${sub.ref}&r=${r}&s=${season}`);
-      return cache[r] = (j.events || []).map(e => {
+      cache[r] = (j.events || []).map(e => {
         const ts = e.strTimestamp ? Date.parse(e.strTimestamp.replace(' ','T') + (/[zZ+]/.test(e.strTimestamp) ? '' : 'Z'))
                  : Date.parse(e.dateEvent + 'T' + (e.strTime || '00:00:00') + 'Z');
         return {id:'tsdb:'+e.idEvent, title:e.strEvent, start:ts, end:ts + 2*36e5, allDay:!e.strTime || e.strTime === '00:00:00',
                 loc:[e.strVenue, e.strCity].filter(Boolean).join(', '), info:'Kolejka ' + r + (e.strTVStation ? ' · TV: ' + e.strTVStation : ''), url:''};
       });
+      ROUND_CACHE[ck(r)] = {t:Date.now(), v:cache[r]};
+      return cache[r];
     };
     const done = evs => evs.length && evs.every(e => e.end < now);
     // Szukanie binarne pierwszej kolejki, która nie jest jeszcze w całości rozegrana
@@ -253,28 +265,43 @@ function zonedToUtc(y, mo, d, h, mi, s, tz){
 
 /* ---------- Synchronizacja ---------- */
 let syncing = false;
+const busy = new Set();
+async function syncOne(sub){
+  busy.add(sub.id); if (tab === 'subs') render();
+  try{
+    const list = await Sources[sub.src](sub);
+    const kw = (sub.filter || '').toLowerCase().split(',').map(x => x.trim()).filter(Boolean);
+    for (const k of Object.keys(S.events)) if (S.events[k].sub === sub.id) delete S.events[k];
+    for (const e of list){
+      if (!e.start || isNaN(e.start)) continue;
+      if (kw.length && !kw.some(w => (e.title + ' ' + e.loc).toLowerCase().includes(w))) continue;
+      const key = sub.id + '|' + e.id;
+      S.events[key] = {...e, key, sub:sub.id};
+    }
+    sub.lastOk = Date.now(); sub.err = ''; return true;
+  }catch(err){ sub.err = String(err.message || err); return false; }   // stare wydarzenia zostają
+  finally{ busy.delete(sub.id); }
+}
+function afterSync(){
+  for (const k of Object.keys(S.events)) if (S.events[k].end < Date.now() - 30*DAY) delete S.events[k];
+  save(); reschedule(); render();
+}
 async function syncAll(manual){
   if (syncing) return; syncing = true; $('#syncBtn').textContent = '⟳ …';
   let ok = 0, fail = [];
   for (const sub of S.subs.filter(s => s.on !== false)){
-    try{
-      const list = await Sources[sub.src](sub);
-      const kw = (sub.filter || '').toLowerCase().split(',').map(x => x.trim()).filter(Boolean);
-      for (const k of Object.keys(S.events)) if (S.events[k].sub === sub.id) delete S.events[k];
-      for (const e of list){
-        if (!e.start || isNaN(e.start)) continue;
-        if (kw.length && !kw.some(w => (e.title + ' ' + e.loc).toLowerCase().includes(w))) continue;
-        const key = sub.id + '|' + e.id;
-        S.events[key] = {...e, key, sub:sub.id};
-      }
-      sub.lastOk = Date.now(); sub.err = ''; ok++;
-    }catch(err){ sub.err = String(err.message || err); fail.push(sub.name); }
+    if (busy.has(sub.id)) continue;
+    (await syncOne(sub)) ? ok++ : fail.push(sub.name);
   }
-  // Sprzątanie: wydarzenia starsze niż 30 dni
-  for (const k of Object.keys(S.events)) if (S.events[k].end < Date.now() - 30*DAY) delete S.events[k];
-  S.set.lastSync = Date.now(); save(); reschedule(); render();
+  S.set.lastSync = Date.now(); afterSync();
   syncing = false; $('#syncBtn').textContent = '⟳ Odśwież';
   if (manual || fail.length) toast(fail.length ? 'Błąd: ' + fail.join(', ') : `Zaktualizowano (${ok})`);
+}
+async function syncSub(id){
+  const sub = S.subs.find(x => x.id === id); if (!sub || busy.has(id)) return;
+  const ok = await syncOne(sub); afterSync();
+  const n = Object.values(S.events).filter(e => e.sub === id && e.end > Date.now()).length;
+  toast(ok ? `${sub.name}: ${n} nadchodzących` : `${sub.name}: ${sub.err}`);
 }
 
 /* ---------- Przypomnienia ---------- */
@@ -373,10 +400,12 @@ function vSubs(){
   $('#view').innerHTML = `<button class="btn acc" style="width:100%;margin-bottom:12px" onclick="openAdd()">+ Dodaj co obserwować</button>` +
     (S.subs.map(s => `<div class="card" data-sub="${s.id}">
       <div class="row"><span style="width:12px;height:12px;border-radius:50%;background:${s.color}"></span>
-        <b style="flex:1">${esc(s.name)}</b><span class="tag">${SRC[s.src]}</span></div>
+        <b style="flex:1">${esc(s.name)}</b><span class="tag">${SRC[s.src]}</span>
+        <button class="btn sm" data-sync="${s.id}" ${busy.has(s.id) ? 'disabled' : ''}>${busy.has(s.id) ? '…' : '⟳'}</button></div>
       <div class="s" style="color:var(--mut);font-size:13px;margin-top:6px">
         ${s.on === false ? '⏸ wstrzymane · ' : ''}${cnt(s.id)} nadchodzących${s.filter ? ' · filtr: ' + esc(s.filter) : ''}
         · przypomnienia: ${(s.remind || S.set.remind).map(m => m ? fmtOff(m) : 'na start').join(', ') || 'brak'}
+        ${s.lastOk ? '<br>pobrane: ' + new Date(s.lastOk).toLocaleString('pl-PL',{day:'numeric',month:'numeric',hour:'2-digit',minute:'2-digit'}) : ''}
         ${s.err ? `<br><span style="color:var(--bad)">Błąd: ${esc(s.err)}</span>` : ''}</div></div>`).join('') || '<div class="empty">Pusto</div>');
 }
 
@@ -521,6 +550,7 @@ function openSub(id){
     <label>Przypomnienia</label><div class="chips" id="sR">${remChips(s.remind || [])}</div>
     <div class="row" style="margin-top:16px">
       <button class="btn acc" id="sSave">Zapisz</button>
+      <button class="btn" id="sSync">⟳ Odśwież</button>
       <button class="btn" id="sPause">${s.on === false ? '▶ Wznów' : '⏸ Wstrzymaj'}</button>
       <button class="btn bad" id="sDel">Usuń</button></div>`);
   if (!s.remind) s.remind = S.set.remind.slice();
@@ -530,6 +560,7 @@ function openSub(id){
   $('#sSave').onclick = () => { s.name = $('#sN').value.trim() || s.name; const f = $('#sF');
     const changed = f && f.value.trim() !== (s.filter || ''); if (f) s.filter = f.value.trim();
     save(); closeSheet(); render(); if (changed) syncAll(); };
+  $('#sSync').onclick = () => { closeSheet(); syncSub(s.id); };
   $('#sPause').onclick = () => { s.on = s.on === false; save(); reschedule(); closeSheet(); render(); };
   $('#sDel').onclick = () => { if (!confirm('Usunąć „' + s.name + '” i jego wydarzenia?')) return;
     S.subs = S.subs.filter(x => x !== s);
@@ -541,6 +572,7 @@ function openSub(id){
 document.querySelector('nav').onclick = e => { const b = e.target.closest('[data-tab]'); if (!b) return; tab = b.dataset.tab; render(); window.scrollTo(0,0); };
 $('#view').onclick = e => {
   const ev = e.target.closest('[data-ev]'); if (ev) return openEvent(ev.dataset.ev);
+  const sy = e.target.closest('[data-sync]'); if (sy) return syncSub(sy.dataset.sync);
   const sb = e.target.closest('[data-sub]'); if (sb) return openSub(sb.dataset.sub);
   const dy = e.target.closest('[data-day]'); if (dy){ calSel = +dy.dataset.day; render(); }
 };
