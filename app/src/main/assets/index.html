@@ -570,20 +570,78 @@ function afterSync(){
   for (const k of Object.keys(S.events)) if (S.events[k].end < Date.now() - 30*DAY) delete S.events[k];
   save(); reschedule(); render();
 }
+/* ---------- Wykrywanie zmian (termin, odwołanie, Polacy na karcie / liście) ---------- */
+const BG = /[?&]bg=1/.test(location.search);
+const perDay = sub => sub.src === 'espn' && !sub.team;   // ESPN dzień po dniu: brak meczu ≠ odwołanie
+function snapshot(){
+  const now = Date.now(), out = {};
+  for (const e of Object.values(S.events)){
+    if (e.start < now || e.start > now + 21*DAY) continue;
+    const f = S.flags[e.key] || {}; if (f.hidden) continue;
+    out[e.key] = {title:e.title, start:e.start, allDay:!!e.allDay, sub:e.sub, conf:isConfirmed(e),
+                  who:e.pl ? (e.pl.conf && e.pl.conf.length ? e.pl.conf.join(', ') : e.pl.who || '') : '', yes:!!(e.pl && e.pl.lvl === 'yes')};
+  }
+  return out;
+}
+const fmtWhen = (t, allDay) => { const d = new Date(t); return `${DN[d.getDay()]} ${d.getDate()}.${String(d.getMonth()+1).padStart(2,'0')}` + (allDay ? '' : ' ' + hm(t)); };
+function diffChanges(before, okSubs){
+  const out = [];
+  for (const [k, o] of Object.entries(before)){
+    const sub = S.subs.find(x => x.id === o.sub); if (!sub || sub.on === false || !okSubs.has(sub.id)) continue;
+    const e = S.events[k];
+    if (!e){
+      if (!perDay(sub) && (!S.set.pl || o.yes || o.conf)) out.push({t:'❌ Zniknęło z kalendarza: ' + o.title, b:'Było: ' + fmtWhen(o.start, o.allDay) + ' · ' + sub.name + ' (odwołane albo przeniesione)'});
+      continue;
+    }
+    const relevant = !S.set.pl || o.yes || o.conf || isConfirmed(e);
+    if (relevant && !o.allDay && !e.allDay && Math.abs(e.start - o.start) >= 5*6e4)
+      out.push({t:'🕒 Zmiana terminu: ' + e.title, b:'Teraz: ' + fmtWhen(e.start) + ' (było ' + fmtWhen(o.start) + ')'});
+    else if (relevant && o.allDay && !e.allDay)
+      out.push({t:'🕒 Znana godzina: ' + e.title, b:fmtWhen(e.start)});
+    if (S.set.pl){
+      const now = isConfirmed(e), who = e.pl ? (e.pl.conf && e.pl.conf.length ? e.pl.conf.join(', ') : e.pl.who || '') : '';
+      if (now && !o.conf) out.push({t:'🇵🇱 Potwierdzone: ' + (who || e.title), b:e.title + ' · ' + fmtWhen(e.start, e.allDay)});
+      else if (!now && o.conf && (e.pl == null || e.pl.lvl === 'yes' || !e.pl.lineupAt)) out.push({t:'⚠ Polak wypadł: ' + (o.who || e.title), b:e.title + ' · ' + fmtWhen(e.start, e.allDay)});
+      else if (now && o.conf && who && o.who && who !== o.who) out.push({t:'🇵🇱 Zmiana składu: ' + e.title, b:'Teraz: ' + who + ' (było: ' + o.who + ')'});
+    }
+  }
+  // Nowe wydarzenia od razu potwierdzone z Polakami (np. dopisana walka, nowa lista startowa)
+  if (S.set.pl) for (const e of Object.values(S.events)){
+    if (before[e.key] || e.start < Date.now() || e.start > Date.now() + 21*DAY || !isConfirmed(e)) continue;
+    const sub = subOf(e); if (!sub || !okSubs.has(sub.id) || !S.set.lastSync) continue;
+    const who = e.pl.conf && e.pl.conf.length ? e.pl.conf.join(', ') : e.pl.who || '';
+    out.push({t:'🇵🇱 Nowe: ' + (who || e.title), b:e.title + ' · ' + fmtWhen(e.start, e.allDay)});
+  }
+  return out;
+}
+function announce(changes){
+  if (!changes.length || S.set.notifyChanges === false) return;
+  if (window.Android && Android.notifyNow){
+    if (changes.length > 4) Android.notifyNow('📋 ' + changes.length + ' zmian w kalendarzu', changes.map(c => c.t).join('\n'));
+    else changes.forEach(c => Android.notifyNow(c.t, c.b));
+  }
+  if (!BG) toast(changes.length === 1 ? changes[0].t : changes.length + ' zmian — szczegóły w powiadomieniach');
+}
+
 async function syncAll(manual){
   if (syncing) return; syncing = true; $('#syncBtn').textContent = '…';
   let ok = 0, fail = [];
+  const before = snapshot(), okSubs = new Set();
   for (const sub of S.subs.filter(s => s.on !== false)){
     if (busy.has(sub.id)) continue;
-    (await syncOne(sub)) ? ok++ : fail.push(sub.name);
+    if (await syncOne(sub)){ ok++; okSubs.add(sub.id); } else fail.push(sub.name);
   }
+  const first = !S.set.lastSync;
   S.set.lastSync = Date.now(); afterSync(); await checkLineups(true);
+  if (!first) announce(diffChanges(before, okSubs));
   syncing = false; $('#syncBtn').textContent = '⟳';
-  if (manual || fail.length) toast(fail.length ? 'Błąd: ' + fail.join(', ') : `Zaktualizowano (${ok})`);
+  if (!BG && (manual || fail.length)) toast(fail.length ? 'Błąd: ' + fail.join(', ') : `Zaktualizowano (${ok})`);
 }
 async function syncSub(id){
   const sub = S.subs.find(x => x.id === id); if (!sub || busy.has(id)) return;
+  const before = snapshot();
   const ok = await syncOne(sub); afterSync();
+  if (ok) announce(diffChanges(before, new Set([sub.id])));
   const n = Object.values(S.events).filter(e => e.sub === id && e.end > Date.now()).length;
   toast(ok ? `${sub.name}: ${n} nadchodzących` : `${sub.name}: ${sub.err}`);
 }
@@ -747,7 +805,8 @@ function vSettings(){
       <button class="chip ${S.set.pl ? 'on' : ''}" id="plOn">${S.set.pl ? 'Włączony' : 'Wyłączony'}</button>
       <button class="chip ${S.set.plMaybe ? 'on' : ''}" id="plMb">Pokazuj standby</button>
       <button class="chip ${S.set.plRemindMaybe ? 'on' : ''}" id="plRm">Przypominaj o standby</button>
-      <button class="chip ${S.set.plLineupNotify ? 'on' : ''}" id="plLu">Powiadom o składzie (w tle)</button></div>
+      <button class="chip ${S.set.plLineupNotify ? 'on' : ''}" id="plLu">Powiadom o składzie (w tle)</button>
+      <button class="chip ${S.set.notifyChanges !== false ? 'on' : ''}" id="ntCh">Powiadamiaj o zmianach</button></div>
     <label>Moi zawodnicy (nazwiska po przecinku): łapani zawsze, nawet gdy źródło nie podaje narodowości</label>
     <input id="plN" value="${esc(S.set.plNames)}">
     <label>Polskie kluby (słowa kluczowe w nazwie meczu)</label>
@@ -764,11 +823,12 @@ function vSettings(){
     <button class="btn sm" id="exp">Eksport kopii</button>
     <label class="btn sm" style="margin:0;color:var(--tx)">Import kopii<input type="file" id="imp" accept=".json,application/json" style="display:none"></label>
     <button class="btn sm" id="tst">Test powiadomienia</button></div>
-    <small>Ostatnia synchronizacja: ${S.set.lastSync ? new Date(S.set.lastSync).toLocaleString('pl-PL') : 'nigdy'}</small></div>
+    <small>Ostatnia synchronizacja: ${S.set.lastSync ? new Date(S.set.lastSync).toLocaleString('pl-PL') : 'nigdy'} · w tle co ~3 h (gdy jest internet)</small></div>
   <p style="text-align:center"><small>Kalendarz Wydarzeń · szkic v0.1</small></p>`;
   bindRemChips($('#remChips'), S.set.remind, v => { S.set.remind = v; save(); });
   $('#plOn').onclick = () => $('#plBtn').click();
   $('#plMb').onclick = () => { S.set.plMaybe = !S.set.plMaybe; save(); reschedule(); render(); };
+  $('#ntCh').onclick = () => { S.set.notifyChanges = S.set.notifyChanges === false; save(); render(); };
   $('#plLu').onclick = () => { S.set.plLineupNotify = !S.set.plLineupNotify; save(); reschedule(); render(); };
   $('#plRm').onclick = () => { S.set.plRemindMaybe = !S.set.plRemindMaybe; save(); reschedule(); render(); };
   $('#plN').onchange = e => { S.set.plNames = e.target.value; save(); if (S.set.pl) syncAll(true); };
@@ -949,11 +1009,19 @@ $('#plBtn').onclick = () => {
   toast(S.set.pl ? 'Tylko wydarzenia z Polakami' : 'Wszystkie wydarzenia');
   if (S.set.pl && plNeedsData()) syncAll(true);   // pierwsze włączenie: dociągnij składy
 };
-window.onNativeResume = () => { if (Date.now() - S.set.lastSync > 3*36e5 && S.subs.length) syncAll(); else { render(); checkLineups(); } };
+window.onNativeResume = () => { S = migrate(load()); if (Date.now() - S.set.lastSync > 3*36e5 && S.subs.length) syncAll(); else { render(); checkLineups(); } };
 
-render();
-if (window.Android && Android.notifyState && Android.notifyState() === 'ask') Android.askNotify();
-if (S.subs.length && Date.now() - S.set.lastSync > 3*36e5) syncAll();
+if (BG){
+  // Synchronizacja w tle (BgSync.java): bez UI, na koniec raport do strony natywnej
+  (async () => {
+    try{ if (S.subs.length) await syncAll(false); else await checkLineups(true); }catch(_){}
+    if (window.Android && Android.bgDone) Android.bgDone();
+  })();
+} else {
+  render();
+  if (window.Android && Android.notifyState && Android.notifyState() === 'ask') Android.askNotify();
+  if (S.subs.length && Date.now() - S.set.lastSync > 3*36e5) syncAll();
+}
 </script>
 </body>
 </html>

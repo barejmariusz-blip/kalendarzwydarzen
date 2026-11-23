@@ -46,6 +46,7 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         Alarms.channels(this);
+        BgSync.schedule(this);
 
         web = new WebView(this);
         web.setBackgroundColor(0xFF0B0D12);
@@ -91,8 +92,15 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    protected void onPause() {
+        super.onPause();
+        BgSync.appVisible = false;
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
+        BgSync.appVisible = true;
         if (web != null) web.evaluateJavascript("window.onNativeResume&&window.onNativeResume()", null);
     }
 
@@ -241,6 +249,11 @@ public class MainActivity extends Activity {
         /** {mode, items:[{start,end,allDay,title,line,color}]} — dane widżetu na ekranie głównym. */
         @JavascriptInterface
         public void widget(String json) { EventsWidget.save(MainActivity.this, json); }
+
+        private int notifSlot = 0;
+
+        @JavascriptInterface
+        public void notifyNow(String title, String body) { Alarms.notify(MainActivity.this, 140 + (notifSlot++ % 20), title, body); }
 
         @JavascriptInterface
         public void test(String title, String body) { Alarms.notify(MainActivity.this, 99, title, body); }

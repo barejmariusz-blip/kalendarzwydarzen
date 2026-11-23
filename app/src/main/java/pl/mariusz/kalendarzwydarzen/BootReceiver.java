@@ -10,5 +10,6 @@ public class BootReceiver extends BroadcastReceiver {
         Alarms.restore(c);
         Lineups.restore(c);
         EventsWidget.refresh(c);
+        BgSync.schedule(c);
     }
 }

@@ -40,6 +40,18 @@ Do tego w ustawieniach: lista „moi zawodnicy” (łapani po nazwisku zawsze, n
 
 Drugi przycisk obok „Polacy”. Zostaje tylko to, co jest już przesądzone: Polak na karcie walk, w opublikowanej drabince, na liście startowej FIS albo **w wyjściowym składzie** meczu. Składy meczowe ESPN publikuje ok. godzinę przed meczem. Apka sprawdza je przy otwarciu i w tle (60 i 25 minut przed meczem, a potem co 10 minut do startu), a gdy Polak jest w pierwszej jedenastce, wysyła powiadomienie „🇵🇱 ✔ … w wyjściowym składzie”.
 
+## Synchronizacja w tle i powiadomienia o zmianach
+
+Mniej więcej co 3 godziny, jeśli jest internet, apka sama odświeża wszystkie źródła, także gdy jest zamknięta i po restarcie telefonu. Uruchamia tę samą logikę co na ekranie (`index.html?bg=1` w niewidocznym WebView). Po każdym odświeżeniu porównuje stan z poprzednim (21 dni do przodu) i wysyła powiadomienia:
+
+- 🕒 **zmiana terminu** (przesunięcie o co najmniej 5 minut) albo **ogłoszona godzina**,
+- ❌ **wydarzenie zniknęło** (odwołane lub przeniesione), z wyjątkiem lig ESPN pobieranych dzień po dniu, gdzie brak meczu nie oznacza odwołania,
+- 🇵🇱 **nowe potwierdzenie**: Polak dopisany do karty, na liście startowej, w drabince albo w składzie,
+- ⚠ **Polak wypadł** z karty lub listy,
+- 🇵🇱 **zmiana składu** Polaków.
+
+W trybie „Polacy” powiadomienia dotyczą tylko wydarzeń z Polakami. Można je wyłączyć w Ustawieniach („Powiadamiaj o zmianach”). Przypomnienia i widżet przeliczają się przy każdym odświeżeniu.
+
 ## Gdzie oglądać 📺
 
 Przy każdym wydarzeniu, od razu na liście, najpierw stoją **polscy nadawcy** (pogrubieni), a po kropce **pozostali** z danych źródła. Mapa praw obowiązuje na sezon 2026/27, stan na listopad 2026. Mecze reprezentacji Polski idą na TVP, skoki w Wiśle i Zakopanem dodatkowo na TVP, a WTA do końca 2026 w Canal+, od 2027 w Eleven. W ustawieniach każdego źródła możesz wpisać własnych nadawców, np. STS TV, i wtedy mają oni pierwszeństwo.
