@@ -46,13 +46,18 @@ input,select,textarea{width:100%;background:var(--card2);color:var(--tx);border:
 .grid .c.o{opacity:.35}.grid .c.td{outline:1px solid var(--acc)}
 .grid .c.sel{background:var(--card2)}
 .dots{display:flex;flex-wrap:wrap;gap:2px;margin-top:4px}.dots i{width:6px;height:6px;border-radius:50%}
+.pl{margin-top:6px;font-size:12px;padding:3px 8px;border-radius:8px;display:inline-block}
+.pl.yes{background:#3a1520;color:#ffb3c0}
+.pl.maybe{border:1px dashed #6b4450;color:#c89aa5}
+.pl.maybe.strong{border-style:solid;color:#e8b4c0}
+#plBtn.on{border-color:#dc143c;color:#ffb3c0;background:#2a0f17}
 .toast{position:fixed;left:50%;bottom:84px;transform:translateX(-50%);background:#222838;padding:9px 14px;border-radius:10px;font-size:14px;z-index:30;display:none;max-width:90%}
 .warn{background:#2a1d14;border-color:#5a3a22;color:#ffc9a8;font-size:13px}
 small{color:var(--mut)}
 </style>
 </head>
 <body>
-<header><h1 id="title">Nadchodzące</h1><button class="btn sm" id="syncBtn">⟳ Odśwież</button></header>
+<header><h1 id="title">Nadchodzące</h1><button class="btn sm" id="plBtn">🇵🇱 Polacy</button><button class="btn sm" id="syncBtn">⟳ Odśwież</button></header>
 <main id="view"></main>
 <nav>
   <button data-tab="up" class="on"><b>☰</b>Nadchodzące</button>
@@ -105,7 +110,8 @@ const ESPN = [
 ];
 
 /* ---------- Stan ---------- */
-let S = load();
+const DOMESTIC = new Set(['4422', '5619', '4709']);   // Ekstraklasa, PlusLiga, KSW
+let S = migrate(load());
 function load(){
   try{ const s = JSON.parse(localStorage.getItem(KEY)); if(s && s.v===1){
     // ESPN nie ma Ekstraklasy → przenosimy na TheSportsDB (kolejki)
@@ -115,6 +121,12 @@ function load(){
     }
     return s; } }catch(e){}
   return {v:1, subs:[], events:{}, flags:{}, set:{remind:[1440,60,0], tsdbKey:'123', horizon:60, lastSync:0}};
+}
+function migrate(s){
+  const d = {pl:false, plMaybe:true, plRemindMaybe:true, plNames:'Sochan', plClubs:'Kielce, Płock, Legia, Lech Poznań, Jagiellonia, Raków, Pogoń Szczecin, Górnik Zabrze'};
+  for (const k in d) if (s.set[k] === undefined) s.set[k] = d[k];
+  for (const x of s.subs) if (!x.plMode) x.plMode = DOMESTIC.has(x.ref) || x.src === 'manual' ? 'always' : x.src === 'ics' ? 'maybe' : 'auto';
+  return s;
 }
 function save(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){ toast('Brak miejsca na dane'); } }
 const ROUND_CACHE = {};
@@ -155,8 +167,16 @@ const Sources = {
       const c = (e.competitions || [])[0] || {};
       const tv = [].concat(...(c.broadcasts || []).map(b => b.names || (b.media ? [b.media.shortName] : []))).filter(Boolean).join(', ');
       const start = Date.parse(e.date || c.date);
+      // Uczestnicy (do trybu „Polacy”): drużyny z pierwszego spotkania, zawodnicy z całej karty / drabinki
+      const teams = (c.competitors || []).filter(x => x.team).map(x => ({id:x.team.id, n:x.team.displayName || x.team.name}));
+      const ath = [];
+      for (const cc of (e.competitions || [])) for (const x of (cc.competitors || [])){
+        const a = x.athlete || (x.athletes || [])[0];
+        if (a) ath.push({n:a.displayName || a.shortName, c:(a.flag && a.flag.alt) || ''});
+      }
       return {id:'espn:'+e.id, title:e.name || e.shortName, start, end:start + 2*36e5, allDay:false,
-              loc:(c.venue && c.venue.fullName) || '', info:tv ? 'TV: '+tv : '', url:((e.links||[])[0]||{}).href || ''};
+              loc:(c.venue && c.venue.fullName) || '', info:tv ? 'TV: '+tv : '', url:((e.links||[])[0]||{}).href || '',
+              part:{teams, ath, comps:(e.competitions || []).length}};
     };
     // Konkretna drużyna: pełny terminarz jednym zapytaniem
     if (sub.team){
@@ -310,6 +330,96 @@ function zonedToUtc(y, mo, d, h, mi, s, tz){
   let t = want - off(want); t = want - off(t); return t;
 }
 
+/* ---------- Tryb „Polacy” ----------
+   pl = {lvl:'yes'|'maybe', who, why}
+   yes   – udział pewny: polska liga/federacja, reprezentacja, Polak na karcie walk / w drabince, polski klub
+   maybe – standby: Polak w kadrze klubu, ale może nie zagrać (rezerwy, kontuzja, mało minut, drabinka nieznana) */
+const PL_COUNTRY = /^(poland|polska|pol)$/i;
+const normTxt = t => String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ł/g, 'l');
+const listOf = str => String(str || '').split(',').map(x => normTxt(x.trim())).filter(Boolean);
+const myNames = () => listOf(S.set.plNames);
+const plClubs = () => listOf(S.set.plClubs);
+const hasAny = (txt, words) => { const t = normTxt(txt); return words.find(w => t.includes(w)); };
+const isPole = a => PL_COUNTRY.test(a.citizenship || '') || ((a.citizenshipCountry || {}).abbreviation === 'POL')
+  || PL_COUNTRY.test((a.flag || {}).alt || '') || PL_COUNTRY.test((a.birthPlace || {}).country || '')
+  || !!hasAny(a.displayName || a.fullName, myNames());
+
+/* Skład klubu z ESPN → lista Polaków + ich sytuacja. Cache 24h, trzymamy tylko streszczenie. */
+async function rosterPoles(path, teamId){
+  S.rost = S.rost || {};
+  const k = path + '|' + teamId, hit = S.rost[k];
+  if (hit && Date.now() - hit.t < DAY) return hit;
+  const j = await getJSON(`https://site.api.espn.com/apis/site/v2/sports/${path}/teams/${teamId}/roster`);
+  let all = j.athletes || [];
+  if (all.length && all[0].items) all = all.flatMap(g => g.items || []);   // NFL/NHL: grupy pozycji
+  const stat = (a, name) => { for (const sp of ((a.statistics || {}).splits || {}).categories || [])
+      for (const st of sp.stats || []) if (st.name === name) return +st.value || 0; return null; };
+  let maxApp = 0;
+  const poles = [];
+  for (const a of all){
+    const app = stat(a, 'appearances'); if (app != null) maxApp = Math.max(maxApp, app);
+    if (!isPole(a)) continue;
+    poles.push({n:a.shortName || a.displayName, app, sub:stat(a, 'subIns'),
+                inj:(a.injuries || []).length > 0 || (a.status && a.status.type && a.status.type !== 'active')});
+  }
+  return S.rost[k] = {t:Date.now(), poles, maxApp, share:all.length ? poles.length / all.length : 0};
+}
+function poleWhy(p, maxApp){
+  if (p.inj) return 'kontuzja / poza składem';
+  if (p.app == null) return 'w kadrze';
+  if (p.app === 0) return 'nie zagrał w tym sezonie';
+  if (maxApp && p.app / maxApp < 0.35) return `rzadko gra (${p.app} z ~${maxApp})`;
+  if (p.sub != null && p.sub >= p.app * 0.7) return `głównie z ławki (${p.app - p.sub} w podst.)`;
+  return `gra regularnie (${p.app} z ~${maxApp})`;
+}
+
+async function plAnnotate(sub, list){
+  const mode = sub.plMode || 'auto', names = myNames(), clubs = plClubs();
+  if (mode === 'never'){ list.forEach(e => e.pl = null); return; }
+  if (mode === 'always'){ list.forEach(e => e.pl = {lvl:'yes', who:'', why:sub.name}); return; }
+  if (mode === 'maybe'){ list.forEach(e => e.pl = {lvl:'maybe', who:'', why:'brak danych o składzie'}); return; }
+  const ref = sub.ref || '';
+  // Kluby ESPN: składy drużyn występujących w pobranych meczach
+  const teamSport = sub.src === 'espn' && !/^(mma|racing|tennis)\//.test(ref);
+  const rosters = {};
+  if (teamSport){
+    const ids = [...new Set(list.flatMap(e => (e.part && e.part.teams || []).map(t => t.id)))];
+    let i = 0;
+    const worker = async () => { while (i < ids.length){ const id = ids[i++];
+      try{ rosters[id] = await rosterPoles(ref, id); }catch(_){ } } };
+    await Promise.all([worker(), worker(), worker()]);
+  }
+  for (const e of list){
+    e.pl = null;
+    const byName = hasAny(e.title, names);
+    if (byName){ e.pl = {lvl:'yes', who:byName, why:'na twojej liście'}; continue; }
+    const part = e.part || {};
+    // Walki / tenis: flagi zawodników
+    const poles = (part.ath || []).filter(a => PL_COUNTRY.test(a.c) || hasAny(a.n, names));
+    if (poles.length){ e.pl = {lvl:'yes', who:[...new Set(poles.map(a => a.n))].join(', '), why:''}; continue; }
+    if (/^tennis\//.test(ref)){ if (!part.ath || !part.ath.length) e.pl = {lvl:'maybe', who:'', why:'drabinka jeszcze nieznana'}; continue; }
+    // Reprezentacja
+    if ((part.teams || []).some(t => PL_COUNTRY.test(t.n))){ e.pl = {lvl:'yes', who:'Polska', why:'reprezentacja'}; continue; }
+    // Polski klub (słowo kluczowe albo skład w większości polski)
+    const club = hasAny(e.title, clubs);
+    if (club){ e.pl = {lvl:'yes', who:'', why:'polski klub'}; continue; }
+    if (teamSport){
+      const found = [];
+      for (const t of (part.teams || [])){
+        const r = rosters[t.id]; if (!r) continue;
+        if (r.share >= 0.5){ e.pl = {lvl:'yes', who:t.n, why:'polski klub'}; break; }
+        for (const p of r.poles) found.push({...p, team:t.n, maxApp:r.maxApp});
+      }
+      if (e.pl) continue;
+      if (found.length){
+        found.sort((a,b) => (b.app || 0) - (a.app || 0));
+        const lead = found[0], regular = !lead.inj && lead.app != null && lead.maxApp && lead.app / lead.maxApp >= 0.35 && !(lead.sub != null && lead.sub >= lead.app * 0.7);
+        e.pl = {lvl:'maybe', strong:regular, who:found.map(p => p.n).join(', '), why:found.map(p => p.n + ': ' + poleWhy(p, p.maxApp)).join(' · ')};
+      }
+    }
+  }
+}
+
 /* ---------- Synchronizacja ---------- */
 let syncing = false;
 const busy = new Set();
@@ -317,6 +427,8 @@ async function syncOne(sub){
   busy.add(sub.id); if (tab === 'subs') render();
   try{
     const list = await Sources[sub.src](sub);
+    if (S.set.pl) await plAnnotate(sub, list);
+    list.forEach(e => delete e.part);
     const kw = (sub.filter || '').toLowerCase().split(',').map(x => x.trim()).filter(Boolean);
     for (const k of Object.keys(S.events)) if (S.events[k].sub === sub.id) delete S.events[k];
     for (const e of list){
@@ -357,9 +469,11 @@ function reschedule(){
   for (const e of Object.values(S.events)){
     const sub = subOf(e); if (!sub || sub.on === false) continue;
     const f = S.flags[e.key] || {}; if (f.hidden || f.mute) continue;
+    if (S.set.pl && !(e.pl && (e.pl.lvl === 'yes' || (S.set.plMaybe && S.set.plRemindMaybe)))) continue;
+    const tag = S.set.pl && e.pl ? (e.pl.lvl === 'yes' ? '🇵🇱 ' : '🇵🇱? ') : '';
     for (const off of (sub.remind || S.set.remind)){
       const at = e.start - off*6e4; if (at <= now) continue;
-      list.push({at, title:(off === 0 ? '▶ Start: ' : '⏰ ') + e.title,
+      list.push({at, title:(off === 0 ? '▶ Start: ' : '⏰ ') + tag + e.title + (tag && e.pl.who ? ' (' + e.pl.who + ')' : ''),
                  body:(off === 0 ? 'Właśnie się zaczyna' : 'Za ' + fmtOff(off)) + ' · ' + fmtTime(e) + (e.info ? ' · ' + e.info : '')});
     }
   }
@@ -379,8 +493,9 @@ const hm = t => new Date(t).toLocaleTimeString('pl-PL',{hour:'2-digit',minute:'2
 const fmtTime = e => { const d = new Date(e.start); return `${DN[d.getDay()]} ${d.getDate()} ${MN[d.getMonth()]}` + (e.allDay ? '' : ', ' + hm(e.start)); };
 const dayKey = t => { const d = new Date(t); return d.getFullYear()*1e4 + d.getMonth()*100 + d.getDate(); };
 function toast(t){ const el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(() => el.style.display = 'none', 2600); }
+const plPass = e => !S.set.pl || (e.pl && (e.pl.lvl === 'yes' || S.set.plMaybe));
 function visibleEvents(){
-  return Object.values(S.events).filter(e => { const s = subOf(e); return s && s.on !== false && !(S.flags[e.key] || {}).hidden; })
+  return Object.values(S.events).filter(e => { const s = subOf(e); return s && s.on !== false && !(S.flags[e.key] || {}).hidden && plPass(e); })
     .sort((a,b) => a.start - b.start);
 }
 
@@ -390,17 +505,24 @@ const TITLES = {up:'Nadchodzące', cal:'Kalendarz', subs:'Obserwowane', set:'Ust
 
 function render(){
   $('#title').textContent = TITLES[tab];
+  $('#plBtn').classList.toggle('on', !!S.set.pl);
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
   ({up:vUpcoming, cal:vCalendar, subs:vSubs, set:vSettings})[tab]();
 }
 
+function plBadge(e){
+  if (!S.set.pl || !e.pl) return '';
+  const p = e.pl, txt = p.lvl === 'yes' ? (p.who || p.why) : (p.who ? p.who + ' — ' : '') + (p.strong ? 'prawdopodobnie zagra' : 'standby');
+  return `<div class="pl ${p.lvl}${p.strong ? ' strong' : ''}">${p.lvl === 'yes' ? '🇵🇱' : '🇵🇱?'} ${esc(txt)}</div>`;
+}
 function evRow(e){
   const s = subOf(e), f = S.flags[e.key] || {}, past = e.end < Date.now();
   return `<div class="card ev ${past ? 'past' : ''}" data-ev="${esc(e.key)}">
     <div class="bar" style="background:${s.color}"></div>
     <div class="t">${e.allDay ? 'cały<br>dzień' : hm(e.start)}</div>
     <div class="m"><div class="n">${esc(e.title)}</div>
-      <div class="s"><span class="tag">${esc(s.name)}</span>${f.mute ? '<span class="tag">🔕</span>' : ''}${esc(e.info || e.loc)}</div></div></div>`;
+      <div class="s"><span class="tag">${esc(s.name)}</span>${f.mute ? '<span class="tag">🔕</span>' : ''}${esc(e.info || e.loc)}</div>
+      ${plBadge(e)}</div></div>`;
 }
 
 function vUpcoming(){
@@ -430,7 +552,7 @@ function vCalendar(){
   for (let i = 0; i < total; i++){
     const d = new Date(y, m, 1 - startOff + i), k = dayKey(d), evs = byDay[k] || [];
     cells += `<div class="c ${d.getMonth() !== m ? 'o' : ''} ${k === tdk ? 'td' : ''} ${k === calSel ? 'sel' : ''}" data-day="${k}">${d.getDate()}
-      <div class="dots">${evs.slice(0,6).map(e => `<i style="background:${subOf(e).color}"></i>`).join('')}</div></div>`;
+      <div class="dots">${evs.slice(0,6).map(e => S.set.pl && e.pl && e.pl.lvl === 'maybe' ? `<i style="border:1px solid ${subOf(e).color}"></i>` : `<i style="background:${subOf(e).color}"></i>`).join('')}</div></div>`;
   }
   const sel = calSel ? (byDay[calSel] || []) : [];
   $('#view').innerHTML = `<div class="row" style="justify-content:space-between;margin-bottom:10px">
@@ -460,6 +582,16 @@ function vSettings(){
   const st = window.Android && Android.notifyState ? Android.notifyState() : 'granted';
   $('#view').innerHTML = `
   ${st !== 'granted' ? `<div class="card warn">Powiadomienia są wyłączone, przypomnienia nie dotrą.<br><br><button class="btn sm" onclick="Android.askNotify()">Włącz powiadomienia</button></div>` : ''}
+  <div class="card"><b>🇵🇱 Tryb „Polacy”</b>
+    <div class="row" style="margin-top:8px">
+      <button class="chip ${S.set.pl ? 'on' : ''}" id="plOn">${S.set.pl ? 'Włączony' : 'Wyłączony'}</button>
+      <button class="chip ${S.set.plMaybe ? 'on' : ''}" id="plMb">Pokazuj standby</button>
+      <button class="chip ${S.set.plRemindMaybe ? 'on' : ''}" id="plRm">Przypominaj o standby</button></div>
+    <label>Moi zawodnicy (nazwiska po przecinku): łapani zawsze, nawet gdy źródło nie podaje narodowości</label>
+    <input id="plN" value="${esc(S.set.plNames)}">
+    <label>Polskie kluby (słowa kluczowe w nazwie meczu)</label>
+    <input id="plC" value="${esc(S.set.plClubs)}">
+    <small>Pewne: polska liga, KSW, reprezentacja, Polak na karcie walk lub w drabince, polski klub. Standby: Polak w kadrze klubu, ale może nie zagrać.</small></div>
   <div class="card"><b>Domyślne przypomnienia</b><div class="chips" style="margin-top:8px" id="remChips">${remChips(S.set.remind)}</div>
     <small>Dla nowych obserwowanych. Każde źródło można ustawić osobno.</small></div>
   <div class="card"><b>Zakres pobierania</b>
@@ -474,6 +606,11 @@ function vSettings(){
     <small>Ostatnia synchronizacja: ${S.set.lastSync ? new Date(S.set.lastSync).toLocaleString('pl-PL') : 'nigdy'}</small></div>
   <p style="text-align:center"><small>Kalendarz Wydarzeń · szkic v0.1</small></p>`;
   bindRemChips($('#remChips'), S.set.remind, v => { S.set.remind = v; save(); });
+  $('#plOn').onclick = () => $('#plBtn').click();
+  $('#plMb').onclick = () => { S.set.plMaybe = !S.set.plMaybe; save(); reschedule(); render(); };
+  $('#plRm').onclick = () => { S.set.plRemindMaybe = !S.set.plRemindMaybe; save(); reschedule(); render(); };
+  $('#plN').onchange = e => { S.set.plNames = e.target.value; save(); if (S.set.pl) syncAll(true); };
+  $('#plC').onchange = e => { S.set.plClubs = e.target.value; save(); if (S.set.pl) syncAll(true); };
   $('#hor').onchange = e => { S.set.horizon = Math.max(7, Math.min(365, +e.target.value || 60)); save(); };
   $('#tkey').onchange = e => { S.set.tsdbKey = e.target.value.trim() || '123'; save(); };
   $('#exp').onclick = () => {
@@ -482,7 +619,7 @@ function vSettings(){
     else { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([data])); a.download = name; a.click(); }
   };
   $('#imp').onchange = e => { const f = e.target.files[0]; if (!f) return; f.text().then(t => {
-    try{ const s = JSON.parse(t); if (s.v !== 1) throw 0; S = s; save(); reschedule(); toast('Wczytano kopię'); render(); }catch(_){ toast('Zły plik'); } }); };
+    try{ const s = JSON.parse(t); if (s.v !== 1) throw 0; S = migrate(s); save(); reschedule(); toast('Wczytano kopię'); render(); }catch(_){ toast('Zły plik'); } }); };
   $('#tst').onclick = () => { if (window.Android && Android.test) Android.test('⏰ Test', 'Tak będzie wyglądać przypomnienie'); else toast('Tylko w apce'); };
 }
 
@@ -505,7 +642,8 @@ function openEvent(key){
   const e = S.events[key]; if (!e) return; const s = subOf(e), f = S.flags[key] || {};
   sheet(`<span class="tag" style="color:${s.color}">${esc(s.name)}</span><h2 style="margin-top:8px">${esc(e.title)}</h2>
     <p>🗓 ${fmtTime(e)}${e.allDay ? ' (cały dzień)' : ''}</p>
-    ${e.loc ? `<p>📍 ${esc(e.loc)}</p>` : ''}${e.info ? `<p style="white-space:pre-wrap;color:var(--mut)">${esc(e.info)}</p>` : ''}
+    ${e.loc ? `<p>📍 ${esc(e.loc)}</p>` : ''}
+    ${e.pl ? `<p>${e.pl.lvl === 'yes' ? '🇵🇱 <b>Polacy na pewno</b>' : '🇵🇱? <b>Standby</b>'}${e.pl.who ? ': ' + esc(e.pl.who) : ''}${e.pl.why && e.pl.lvl === 'maybe' ? `<br><small>${esc(e.pl.why)}</small>` : e.pl.why && !e.pl.who ? ' · ' + esc(e.pl.why) : ''}</p>` : ''}${e.info ? `<p style="white-space:pre-wrap;color:var(--mut)">${esc(e.info)}</p>` : ''}
     <div class="row" style="margin-top:14px">
       <button class="btn acc" id="toCal">+ Do kalendarza Google</button>
       <button class="btn" id="mute">${f.mute ? '🔔 Włącz przypomnienia' : '🔕 Bez przypomnień'}</button>
@@ -585,7 +723,8 @@ function form(title, fields, cb){
   $('#fOk').onclick = () => { const v = {}; fields.forEach(([k]) => v[k] = $('#f_' + k).value.trim());
     if (fields.some(([k]) => k === 'ref') && !v.ref) return toast('Uzupełnij pole'); cb(v); };
 }
-function mkSub(o){ return {id:uid(), on:true, color:COLORS[S.subs.length % COLORS.length], remind:S.set.remind.slice(), ...o}; }
+function mkSub(o){ return {id:uid(), on:true, color:COLORS[S.subs.length % COLORS.length], remind:S.set.remind.slice(),
+  plMode:DOMESTIC.has(o.ref) || o.src === 'manual' ? 'always' : o.src === 'ics' ? 'maybe' : 'auto', ...o}; }
 function addSub(o){
   if (!o.name) o.name = o.ref;
   S.subs.push(mkSub(o)); save(); closeSheet(); tab = 'subs'; render(); toast('Dodano, pobieram…'); syncAll();
@@ -597,6 +736,9 @@ function openSub(id){
     <label>Nazwa</label><input id="sN" value="${esc(s.name)}">
     ${s.src !== 'manual' ? `<label>Filtr (słowa po przecinku)</label><input id="sF" value="${esc(s.filter || '')}">` : ''}
     <label>Kolor</label><div class="chips" id="sC">${COLORS.map(c => `<button class="chip ${c === s.color ? 'on' : ''}" data-c="${c}" style="background:${c};width:30px;height:30px;padding:0"></button>`).join('')}</div>
+    <label>Polacy w tym źródle</label>
+    <div class="chips" id="sP">${[['auto','automatycznie'],['always','zawsze (polska liga)'],['maybe','zawsze standby'],['never','pomijaj']]
+      .map(([v,l]) => `<button class="chip ${(s.plMode || 'auto') === v ? 'on' : ''}" data-p="${v}">${l}</button>`).join('')}</div>
     <label>Przypomnienia</label><div class="chips" id="sR">${remChips(s.remind || [])}</div>
     <div class="row" style="margin-top:16px">
       <button class="btn acc" id="sSave">Zapisz</button>
@@ -605,11 +747,14 @@ function openSub(id){
       <button class="btn bad" id="sDel">Usuń</button></div>`);
   if (!s.remind) s.remind = S.set.remind.slice();
   bindRemChips($('#sR'), s.remind, () => save());
+  $('#sP').onclick = e => { const b = e.target.closest('[data-p]'); if (!b) return; s.plMode = b.dataset.p;
+    $('#sP').querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x === b)); s._plDirty = true; };
   $('#sC').onclick = e => { const b = e.target.closest('[data-c]'); if (!b) return; s.color = b.dataset.c;
     $('#sC').querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x === b)); };
   $('#sSave').onclick = () => { s.name = $('#sN').value.trim() || s.name; const f = $('#sF');
     const changed = f && f.value.trim() !== (s.filter || ''); if (f) s.filter = f.value.trim();
-    save(); closeSheet(); render(); if (changed) syncAll(); };
+    const pd = s._plDirty; delete s._plDirty;
+    save(); closeSheet(); render(); if (changed || (pd && S.set.pl)) syncSub(s.id); };
   $('#sSync').onclick = () => { closeSheet(); syncSub(s.id); };
   $('#sPause').onclick = () => { s.on = s.on === false; save(); reschedule(); closeSheet(); render(); };
   $('#sDel').onclick = () => { if (!confirm('Usunąć „' + s.name + '” i jego wydarzenia?')) return;
@@ -627,6 +772,12 @@ $('#view').onclick = e => {
   const dy = e.target.closest('[data-day]'); if (dy){ calSel = +dy.dataset.day; render(); }
 };
 $('#syncBtn').onclick = () => syncAll(true);
+const plNeedsData = () => S.subs.some(sb => Object.values(S.events).some(e => e.sub === sb.id && e.pl === undefined));
+$('#plBtn').onclick = () => {
+  S.set.pl = !S.set.pl; save(); reschedule(); render();
+  toast(S.set.pl ? 'Tylko wydarzenia z Polakami' : 'Wszystkie wydarzenia');
+  if (S.set.pl && plNeedsData()) syncAll(true);   // pierwsze włączenie: dociągnij składy
+};
 window.onNativeResume = () => { if (Date.now() - S.set.lastSync > 3*36e5 && S.subs.length) syncAll(); else render(); };
 
 render();

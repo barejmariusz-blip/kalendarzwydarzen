@@ -26,6 +26,15 @@ ESPN: dla lig drużynowych można obserwować **całą ligę** (pobieranie dzie�
 
 Do każdego źródła można dodać **filtr** (słowa po przecinku), np. ESPN Bundesliga + `Bayern` daje tylko mecze Bayernu, a UFC + `Prochazka` tylko jego walki.
 
+## Tryb „Polacy” 🇵🇱
+
+Przycisk w nagłówku. Zostają tylko wydarzenia z udziałem Polaków, w dwóch poziomach:
+
+- **🇵🇱 pewne:** polska liga lub federacja (Ekstraklasa, PlusLiga, KSW), reprezentacja, Polak na karcie walk (flaga z ESPN), Polak w drabince turnieju, polski klub.
+- **🇵🇱? standby:** Polak w kadrze klubu, ale może nie zagrać. Apka czyta skład klubu z ESPN (obywatelstwo, kontuzje, występy w sezonie) i podaje powód: gra regularnie, głównie z ławki, rzadko gra, nie zagrał w sezonie, kontuzja. Tenis bez znanej drabinki też trafia do standby.
+
+Do tego w ustawieniach: lista „moi zawodnicy” (łapani po nazwisku zawsze, np. Sochan, którego ESPN nie oznacza jako Polaka), słowa kluczowe polskich klubów i osobny tryb dla każdego źródła (auto / zawsze / standby / pomijaj).
+
 ## Architektura
 
 ```
