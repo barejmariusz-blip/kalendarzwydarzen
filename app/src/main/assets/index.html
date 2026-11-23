@@ -56,6 +56,7 @@ header h1{font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellips
 header .btn{white-space:nowrap;padding:6px 8px}
 header{gap:6px}
 .tv{margin-top:5px;font-size:12.5px;color:#cfd6e6}.tv b{font-weight:600;color:#fff}.tvo{color:var(--mut)}
+.res{margin-top:5px;font-size:12.5px;color:#ffd25b}
 .toast{position:fixed;left:50%;bottom:84px;transform:translateX(-50%);background:#222838;padding:9px 14px;border-radius:10px;font-size:14px;z-index:30;display:none;max-width:90%}
 .warn{background:#2a1d14;border-color:#5a3a22;color:#ffc9a8;font-size:13px}
 small{color:var(--mut)}
@@ -180,14 +181,29 @@ const Sources = {
       const start = Date.parse(e.date || c.date);
       // Uczestnicy (do trybu „Polacy”): drużyny z pierwszego spotkania, zawodnicy z całej karty / drabinki
       const teams = (c.competitors || []).filter(x => x.team).map(x => ({id:x.team.id, n:x.team.displayName || x.team.name}));
-      const ath = [];
-      for (const cc of (e.competitions || [])) for (const x of (cc.competitors || [])){
-        const a = x.athlete || (x.athletes || [])[0];
-        if (a) ath.push({n:a.displayName || a.shortName, c:(a.flag && a.flag.alt) || ''});
+      const ath = [], fights = [];
+      for (const cc of (e.competitions || [])){
+        const fa = [];
+        for (const x of (cc.competitors || [])){
+          const a = x.athlete || (x.athletes || [])[0];
+          if (a){ const r = {n:a.displayName || a.shortName, c:(a.flag && a.flag.alt) || '', w:!!x.winner}; ath.push(r); fa.push(r); }
+        }
+        const st = (cc.status || {}).type || {};
+        const how = ((cc.details || []).map(d => (d.type || {}).text || '').find(t => /^Unofficial Winner/i.test(t)) || '').replace(/^Unofficial Winner\s*/i, '');
+        if (fa.length) fights.push({at:Date.parse(cc.date || cc.startDate || e.date), a:fa, done:!!st.completed,
+                                    how, rnd:(cc.status || {}).period || 0, clk:(cc.status || {}).displayClock || ''});
+      }
+      // Wynik meczu drużynowego po końcowym gwizdku: „A 1:2 B” w kolejności z nazwy
+      let res = '';
+      const st0 = (c.status || {}).type || {};
+      if (st0.completed && teams.length === 2){
+        const sc = {}; (c.competitors || []).forEach(x => sc[x.team && x.team.id] = x.score);
+        const [h, a] = [(c.competitors || []).find(x => x.homeAway === 'home'), (c.competitors || []).find(x => x.homeAway === 'away')];
+        if (h && a) res = `${a.team.displayName} ${a.score}:${h.score} ${h.team.displayName}`;
       }
       return {id:'espn:'+e.id, title:e.name || e.shortName, start, end:start + 2*36e5, allDay:false,
               loc:(c.venue && c.venue.fullName) || '', info:tv ? 'TV: '+tv : '', url:((e.links||[])[0]||{}).href || '',
-              part:{teams, ath, comps:(e.competitions || []).length}};
+              res, part:{teams, ath, fights, comps:(e.competitions || []).length}};
     };
     // Konkretna drużyna: pełny terminarz jednym zapytaniem
     if (sub.team){
@@ -246,7 +262,9 @@ const Sources = {
           const ts = e.strTimestamp ? Date.parse(e.strTimestamp.replace(' ','T') + (/[zZ+]/.test(e.strTimestamp) ? '' : 'Z'))
                    : Date.parse(e.dateEvent + 'T' + (e.strTime || '00:00:00') + 'Z');
           const noTime = /T00:00:00/.test(e.strTimestamp || '') || !e.strTime || e.strTime === '00:00:00';
-          return {id:'tsdb:'+e.idEvent, title:e.strEvent, start:ts, end:ts + (noTime ? DAY : 2*36e5), allDay:noTime,
+          const res = e.intHomeScore != null && e.intHomeScore !== '' && e.intAwayScore != null && e.intAwayScore !== ''
+            ? `${e.strHomeTeam} ${e.intHomeScore}:${e.intAwayScore} ${e.strAwayTeam}` : '';
+          return {id:'tsdb:'+e.idEvent, title:e.strEvent, start:ts, end:ts + (noTime ? DAY : 2*36e5), allDay:noTime, res,
                   loc:[e.strVenue, e.strCity].filter(Boolean).join(', '),
                   info:(sub.yearly ? 'Runda ' : 'Kolejka ') + r + (e.strTVStation ? ' · TV: ' + e.strTVStation : ''), url:''};
         });
@@ -407,8 +425,8 @@ async function plAnnotate(sub, list){
       e.pl = null;
       const url = e.part && e.part.fis; if (!url) continue;
       if (e.start > Date.now() + 10*DAY || e.end < Date.now() - 3*DAY) { const c = S.fisCache[url]; if (c) e.pl = c.pl; continue; }
-      const c = S.fisCache[url];
-      if (c && Date.now() - c.t < (c.pl ? 12 : 3) * 36e5){ e.pl = c.pl; continue; }
+      const c = S.fisCache[url], ended = e.end < Date.now();
+      if (c && (ended ? c.t > e.end : Date.now() - c.t < (c.pl ? 12 : 3) * 36e5)){ e.pl = c.pl; if (c.res) e.res = c.res; continue; }
       try{
         const r = await http(url); if (r.status !== 200) continue;
         const doc = new DOMParser().parseFromString(r.body, 'text/html'), names = myNames();
@@ -416,8 +434,15 @@ async function plAnnotate(sub, list){
           const nat = (a.querySelector('.country__name-short') || {}).textContent || '';
           return nat.trim() === 'POL' || hasAny(a.textContent, names);
         }).map(a => ((a.querySelector('.justify-left.bold') || {}).textContent || '').trim().replace(/\s+/g, ' ')).filter(Boolean);
-        e.pl = poles.length ? {lvl:'yes', who:poles.join(', '), why:'lista startowa FIS'} : null;
-        S.fisCache[url] = {t:Date.now(), pl:e.pl};
+        e.pl = poles.length ? {lvl:'yes', who:poles.join(', '), why:ended ? 'wyniki FIS' : 'lista startowa FIS'} : null;
+        if (ended && poles.length){
+          // Po konkursie pierwsza kolumna to miejsce
+          e.res = [...doc.querySelectorAll('a.table-row[href*="athlete-biography"]')].filter(a => ((a.querySelector('.country__name-short') || {}).textContent || '').trim() === 'POL')
+            .map(a => { const d = a.querySelectorAll('.g-row.justify-sb > div'); const rank = (d[0] && d[0].textContent.trim()) || '?';
+                        const n = ((a.querySelector('.justify-left.bold') || {}).textContent || '').trim().replace(/\s+/g, ' ');
+                        return `${n} ${/^\d+$/.test(rank) ? rank + '.' : rank}`; }).join(' · ');
+        }
+        S.fisCache[url] = {t:Date.now(), pl:e.pl, res:e.res || ''};
       }catch(_){}
     }
     return;
@@ -438,8 +463,30 @@ async function plAnnotate(sub, list){
     if (byName){ e.pl = {lvl:'yes', who:byName, why:'na twojej liście'}; continue; }
     const part = e.part || {};
     // Walki / tenis: flagi zawodników
-    const poles = (part.ath || []).filter(a => PL_COUNTRY.test(a.c) || hasAny(a.n, names));
-    if (poles.length){ e.pl = {lvl:'yes', who:[...new Set(poles.map(a => a.n))].join(', '), why:''}; continue; }
+    const isPl = a => PL_COUNTRY.test(a.c) || !!hasAny(a.n, names);
+    const poles = (part.ath || []).filter(isPl);
+    if (poles.length){
+      e.pl = {lvl:'yes', who:[...new Set(poles.map(a => a.n))].join(', '), why:''};
+      if (/^mma\//.test(ref) && part.fights && part.fights.length){
+        // Szacowana godzina walki: blok karty (wstępna / główna) ma swój start, walki idą po kolei co ~25 min
+        const fl = [], res = [];
+        part.fights.forEach((f, i) => {
+          const pole = f.a.find(isPl); if (!pole) return;
+          const opp = f.a.find(x => x !== pole) || {n:'?'};
+          const idx = part.fights.slice(0, i).filter(x => x.at === f.at).length;
+          fl.push({n:pole.n, vs:opp.n, at:f.at + idx * 25 * 6e4, done:!!f.done});
+          if (f.done){
+            const how = /ko/i.test(f.how) ? 'KO/TKO' : /sub/i.test(f.how) ? 'poddanie' : /dec/i.test(f.how) ? 'decyzja' : f.how;
+            res.push(`${pole.n} ${pole.w ? 'wygrał' : opp.w ? 'przegrał' : 'remis/NC'}${how ? ' (' + how + (f.rnd && !/dec/i.test(f.how) ? ', R' + f.rnd + ' ' + f.clk : '') + ')' : ''} vs ${opp.n}`);
+          }
+        });
+        e.pl.fights = fl;
+        if (res.length) e.res = res.join(' · ');
+        e.pl.who = fl.map(f => f.done ? f.n : `${f.n} ok. ${hm(f.at)}`).join(', ');
+        e.pl.fights = fl.filter(f => !f.done);
+      }
+      continue;
+    }
     if (/^tennis\//.test(ref)) continue;   // tylko gdy Polak jest w opublikowanej drabince (wyżej)
     // Reprezentacja
     if ((part.teams || []).some(t => PL_COUNTRY.test(t.n))){ e.pl = {lvl:'yes', who:'Polska', why:'reprezentacja'}; continue; }
@@ -509,6 +556,11 @@ function tvLine(e){
   const t = tvOf(e);
   if (!t.pl.length && !t.other.length) return '';
   return `<div class="tv">📺 ${t.pl.length ? '<b>' + esc(t.pl.join(' · ')) + '</b>' : ''}${t.other.length ? `<span class="tvo">${t.pl.length ? ' · ' : ''}${esc(t.other.join(', '))}</span>` : ''}</div>`;
+}
+function resLine(e){
+  if (!S.set.results || !e.res) return '';
+  if (S.set.pl && !e.pl) return '';
+  return `<div class="res">🏁 ${esc(e.res)}</div>`;
 }
 const infoNoTv = e => String(e.info || '').replace(/(^|\s·\s)TV: .+$/, '').trim();
 
@@ -605,6 +657,19 @@ function diffChanges(before, okSubs){
       else if (now && o.conf && who && o.who && who !== o.who) out.push({t:'🇵🇱 Zmiana składu: ' + e.title, b:'Teraz: ' + who + ' (było: ' + o.who + ')'});
     }
   }
+  // Wyniki (gdy włączone): każdy wynik ogłaszany raz
+  if (S.set.results){
+    S.resSeen = S.resSeen || {};
+    for (const e of Object.values(S.events)){
+      if (!e.res || S.resSeen[e.key] || e.start < Date.now() - 2*DAY) continue;
+      if (S.set.pl && !e.pl) continue;
+      const sub = subOf(e); if (!sub || sub.on === false || (S.flags[e.key] || {}).hidden) continue;
+      S.resSeen[e.key] = Date.now();
+      out.push({t:'🏁 ' + e.res, b:e.title + ' · ' + sub.name});
+    }
+    for (const k of Object.keys(S.resSeen)) if (Date.now() - S.resSeen[k] > 14*DAY) delete S.resSeen[k];
+    save();
+  }
   // Nowe wydarzenia od razu potwierdzone z Polakami (np. dopisana walka, nowa lista startowa)
   if (S.set.pl) for (const e of Object.values(S.events)){
     if (before[e.key] || e.start < Date.now() || e.start > Date.now() + 21*DAY || !isConfirmed(e)) continue;
@@ -654,6 +719,10 @@ function reschedule(){
     const f = S.flags[e.key] || {}; if (f.hidden || f.mute) continue;
     if (S.set.pl && (S.set.plConf ? !isConfirmed(e) : !(e.pl && (e.pl.lvl === 'yes' || (S.set.plMaybe && S.set.plRemindMaybe))))) continue;
     const tag = S.set.pl && e.pl ? (isConfirmed(e) ? '🇵🇱 ' : '🇵🇱? ') : '';
+    if (S.set.pl && e.pl && e.pl.fights) for (const fi of e.pl.fights){
+      const at = fi.at - 20*6e4;
+      if (at > now) list.push({at, title:'🥊 Za ~20 min: ' + fi.n + ' vs ' + fi.vs, body:e.title + ' · szacowany start walki ' + hm(fi.at) + (tvOf(e).pl.length ? ' · 📺 ' + tvOf(e).pl[0] : '')});
+    }
     for (const off of (sub.remind || S.set.remind)){
       const at = e.start - off*6e4; if (at <= now) continue;
       const who = e.pl && e.pl.conf && e.pl.conf.length ? e.pl.conf.join(', ') : e.pl && e.pl.who;
@@ -740,7 +809,7 @@ function evRow(e){
     <div class="t">${e.allDay ? 'cały<br>dzień' : hm(e.start)}</div>
     <div class="m"><div class="n">${esc(e.title)}</div>
       <div class="s"><span class="tag">${esc(s.name)}</span>${f.mute ? '<span class="tag">🔕</span>' : ''}${esc(infoNoTv(e) || e.loc)}</div>
-      ${tvLine(e)}${plBadge(e)}</div></div>`;
+      ${e.start < Date.now() && e.res && S.set.results ? resLine(e) : tvLine(e)}${plBadge(e)}</div></div>`;
 }
 
 function vUpcoming(){
@@ -751,6 +820,10 @@ function vUpcoming(){
   }
   if (!list.length){ $('#view').innerHTML = `<div class="empty">Brak nadchodzących wydarzeń.<br><small>Odśwież albo sprawdź źródła w „Obserwowane”.</small></div>`; return; }
   let html = '', last = null; const today = dayKey(Date.now()), tmr = dayKey(Date.now() + DAY);
+  if (S.set.results){
+    const recent = visibleEvents().filter(e => e.res && e.start < Date.now() && e.start > Date.now() - 2*DAY && e.end <= Date.now() - 3*36e5).reverse();
+    if (recent.length) html += `<div class="day">🏁 Ostatnie wyniki</div>` + recent.map(evRow).join('');
+  }
   for (const e of list){
     const k = dayKey(e.start);
     if (k !== last){ const d = new Date(e.start);
@@ -806,7 +879,8 @@ function vSettings(){
       <button class="chip ${S.set.plMaybe ? 'on' : ''}" id="plMb">Pokazuj standby</button>
       <button class="chip ${S.set.plRemindMaybe ? 'on' : ''}" id="plRm">Przypominaj o standby</button>
       <button class="chip ${S.set.plLineupNotify ? 'on' : ''}" id="plLu">Powiadom o składzie (w tle)</button>
-      <button class="chip ${S.set.notifyChanges !== false ? 'on' : ''}" id="ntCh">Powiadamiaj o zmianach</button></div>
+      <button class="chip ${S.set.notifyChanges !== false ? 'on' : ''}" id="ntCh">Powiadamiaj o zmianach</button>
+      <button class="chip ${S.set.results ? 'on' : ''}" id="rsOn">🏁 Wyniki po wydarzeniu</button></div>
     <label>Moi zawodnicy (nazwiska po przecinku): łapani zawsze, nawet gdy źródło nie podaje narodowości</label>
     <input id="plN" value="${esc(S.set.plNames)}">
     <label>Polskie kluby (słowa kluczowe w nazwie meczu)</label>
@@ -828,6 +902,9 @@ function vSettings(){
   bindRemChips($('#remChips'), S.set.remind, v => { S.set.remind = v; save(); });
   $('#plOn').onclick = () => $('#plBtn').click();
   $('#plMb').onclick = () => { S.set.plMaybe = !S.set.plMaybe; save(); reschedule(); render(); };
+  $('#rsOn').onclick = () => { S.set.results = !S.set.results;
+    if (S.set.results){ S.resSeen = S.resSeen || {}; for (const e of Object.values(S.events)) if (e.res) S.resSeen[e.key] = Date.now(); }
+    save(); render(); };
   $('#ntCh').onclick = () => { S.set.notifyChanges = S.set.notifyChanges === false; save(); render(); };
   $('#plLu').onclick = () => { S.set.plLineupNotify = !S.set.plLineupNotify; save(); reschedule(); render(); };
   $('#plRm').onclick = () => { S.set.plRemindMaybe = !S.set.plRemindMaybe; save(); reschedule(); render(); };
@@ -865,6 +942,8 @@ function openEvent(key){
   sheet(`<span class="tag" style="color:${s.color}">${esc(s.name)}</span><h2 style="margin-top:8px">${esc(e.title)}</h2>
     <p>🗓 ${fmtTime(e)}${e.allDay ? ' (cały dzień)' : ''}</p>
     ${e.loc ? `<p>📍 ${esc(e.loc)}</p>` : ''}
+    ${e.res ? `<p>🏁 <b>${esc(e.res)}</b></p>` : ''}
+    ${e.pl && e.pl.fights && e.pl.fights.length ? `<p>🥊 ${e.pl.fights.map(f => esc(f.n) + ' vs ' + esc(f.vs) + ' — ok. ' + hm(f.at)).join('<br>')}<br><small>Godzina szacowana: start bloku karty + ~25 min na walkę</small></p>` : ''}
     ${e.pl && e.pl.lineupAt ? `<p>📋 Skład meczowy: ${e.pl.conf && e.pl.conf.length ? '<b>w wyjściowym: ' + esc(e.pl.conf.join(', ')) + '</b>' : 'nikt z Polaków w wyjściowym'}${e.pl.bench && e.pl.bench.length ? '<br>na ławce: ' + esc(e.pl.bench.join(', ')) : ''}<br><small>sprawdzono ${hm(e.pl.lineupAt)}</small></p>` : ''}
     ${e.pl ? `<p>${e.pl.lvl === 'yes' ? '🇵🇱 <b>Polacy na pewno</b>' : '🇵🇱? <b>Standby</b>'}${e.pl.who ? ': ' + esc(e.pl.who) : ''}${e.pl.why && e.pl.lvl === 'maybe' ? `<br><small>${esc(e.pl.why)}</small>` : e.pl.why && !e.pl.who ? ' · ' + esc(e.pl.why) : ''}</p>` : ''}${(() => { const t = tvOf(e); return t.pl.length || t.other.length ? `<p>📺 ${t.pl.length ? '<b>' + esc(t.pl.join(' · ')) + '</b>' : ''}${t.other.length ? `<br><small>inne: ${esc(t.other.join(', '))}</small>` : ''}</p>` : ''; })()}${infoNoTv(e) ? `<p style="white-space:pre-wrap;color:var(--mut)">${esc(infoNoTv(e))}</p>` : ''}
     <div class="row" style="margin-top:14px">

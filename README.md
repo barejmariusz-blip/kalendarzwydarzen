@@ -52,6 +52,11 @@ Mniej więcej co 3 godziny, jeśli jest internet, apka sama odświeża wszystkie
 
 W trybie „Polacy” powiadomienia dotyczą tylko wydarzeń z Polakami. Można je wyłączyć w Ustawieniach („Powiadamiaj o zmianach”). Przypomnienia i widżet przeliczają się przy każdym odświeżeniu.
 
+## Walki Polaków i wyniki
+
+- **Godzina walki:** dla gal UFC apka bierze start bloku karty (wstępna / główna) i kolejność walk, a potem szacuje godzinę walki Polaka, przyjmując ok. 25 minut na walkę, np. „Tybura ok. 21:40”. Dodatkowe przypomnienie przychodzi ok. 20 minut przed szacowaną walką.
+- **🏁 Wyniki po wydarzeniu** (domyślnie wyłączone, Ustawienia): walki (wygrał/przegrał, sposób, runda), miejsca Polaków w skokach z wyników FIS, wynik meczu (ESPN, TheSportsDB). Pojawiają się w sekcji „Ostatnie wyniki” (2 dni wstecz) oraz jako jednorazowe powiadomienie. W trybie „Polacy” dotyczą tylko wydarzeń z Polakami.
+
 ## Gdzie oglądać 📺
 
 Przy każdym wydarzeniu, od razu na liście, najpierw stoją **polscy nadawcy** (pogrubieni), a po kropce **pozostali** z danych źródła. Mapa praw obowiązuje na sezon 2026/27, stan na listopad 2026. Mecze reprezentacji Polski idą na TVP, skoki w Wiśle i Zakopanem dodatkowo na TVP, a WTA do końca 2026 w Canal+, od 2027 w Eleven. W ustawieniach każdego źródła możesz wpisać własnych nadawców, np. STS TV, i wtedy mają oni pierwszeństwo.
