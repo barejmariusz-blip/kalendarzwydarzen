@@ -7,6 +7,7 @@ import android.content.Intent;
 public class AlarmReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context c, Intent i) {
+        EventsWidget.refresh(c);
         Alarms.notify(c, i.getIntExtra("slot", 0), i.getStringExtra("title"), i.getStringExtra("body"));
     }
 }

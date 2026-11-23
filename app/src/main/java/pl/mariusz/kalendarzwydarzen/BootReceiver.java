@@ -9,5 +9,6 @@ public class BootReceiver extends BroadcastReceiver {
     public void onReceive(Context c, Intent i) {
         Alarms.restore(c);
         Lineups.restore(c);
+        EventsWidget.refresh(c);
     }
 }

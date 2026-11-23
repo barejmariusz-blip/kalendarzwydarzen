@@ -40,6 +40,14 @@ Do tego w ustawieniach: lista „moi zawodnicy” (łapani po nazwisku zawsze, n
 
 Drugi przycisk obok „Polacy”. Zostaje tylko to, co jest już przesądzone: Polak na karcie walk, w opublikowanej drabince, na liście startowej FIS albo **w wyjściowym składzie** meczu. Składy meczowe ESPN publikuje ok. godzinę przed meczem. Apka sprawdza je przy otwarciu i w tle (60 i 25 minut przed meczem, a potem co 10 minut do startu), a gdy Polak jest w pierwszej jedenastce, wysyła powiadomienie „🇵🇱 ✔ … w wyjściowym składzie”.
 
+## Gdzie oglądać 📺
+
+Przy każdym wydarzeniu, od razu na liście, najpierw stoją **polscy nadawcy** (pogrubieni), a po kropce **pozostali** z danych źródła. Mapa praw obowiązuje na sezon 2026/27, stan na listopad 2026. Mecze reprezentacji Polski idą na TVP, skoki w Wiśle i Zakopanem dodatkowo na TVP, a WTA do końca 2026 w Canal+, od 2027 w Eleven. W ustawieniach każdego źródła możesz wpisać własnych nadawców, np. STS TV, i wtedy mają oni pierwszeństwo.
+
+## Widżet
+
+„Kalendarz Wydarzeń” w widżetach ekranu głównego (rozmiar 4×3) pokazuje 4 najbliższe wydarzenia według bieżącego trybu (wszystkie / Polacy / Potwierdzone), z godziną, nazwą, nadawcą i nazwiskami Polaków. Minione wydarzenia znikają same, bez otwierania apki. Kliknięcie otwiera aplikację.
+
 ## Architektura
 
 ```

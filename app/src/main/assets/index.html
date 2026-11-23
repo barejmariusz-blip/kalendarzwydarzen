@@ -55,6 +55,7 @@ input,select,textarea{width:100%;background:var(--card2);color:var(--tx);border:
 header h1{font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 header .btn{white-space:nowrap;padding:6px 8px}
 header{gap:6px}
+.tv{margin-top:5px;font-size:12.5px;color:#cfd6e6}.tv b{font-weight:600;color:#fff}.tvo{color:var(--mut)}
 .toast{position:fixed;left:50%;bottom:84px;transform:translateX(-50%);background:#222838;padding:9px 14px;border-radius:10px;font-size:14px;z-index:30;display:none;max-width:90%}
 .warn{background:#2a1d14;border-color:#5a3a22;color:#ffc9a8;font-size:13px}
 small{color:var(--mut)}
@@ -464,6 +465,53 @@ async function plAnnotate(sub, list){
   }
 }
 
+/* ---------- Gdzie oglądać ----------
+   Polscy nadawcy wg praw na sezon 2026/27 (stan: listopad 2026), potem nadawcy ze źródła danych.
+   Własny wpis w ustawieniach źródła ma pierwszeństwo. */
+const isPolandEv = e => /\b(Poland|Polska)\b/i.test(e.title);
+const TV_PL = {
+  'soccer/eng.1': ['Canal+ Sport'],
+  'soccer/esp.1': ['Canal+ Sport'],
+  'soccer/ger.1': ['Eleven Sports', 'Polsat Sport Premium (wybrane)'],
+  'soccer/ita.1': ['Eleven Sports'],
+  'soccer/fra.1': ['Eleven Sports'],
+  'soccer/ned.1': ['Polsat Sport'],
+  'soccer/uefa.champions': ['Canal+ Extra', 'TVP Sport (1 mecz kolejki)'],
+  'soccer/uefa.europa': ['Polsat Sport'],
+  'soccer/uefa.europa.conf': ['Polsat Sport'],
+  'soccer/uefa.nations': e => isPolandEv(e) ? ['TVP 1', 'TVP Sport'] : ['Polsat Sport', 'TVP Sport (wybrane)'],
+  'soccer/fifa.friendly': e => isPolandEv(e) ? ['TVP 1', 'TVP Sport'] : [],
+  '4422': ['Canal+ Sport', 'TVP Sport (1 mecz kolejki)'],
+  'mma/ufc': ['Polsat Sport 1', 'Polsat Box Go', 'UFC Fight Pass'],
+  '4709': ['Canal+'],
+  'racing/f1': ['Eleven Sports 1'],
+  '4407': ['Polsat Sport Premium 2', 'Polsat Box Go'],
+  'racing/irl': ['IndyCar Live (online, bez polskiego nadawcy)'],
+  '5619': ['Polsat Sport', 'Polsat Box Go'],
+  '4980': ['Polsat Sport', 'Polsat Box Go'],
+  'tennis/atp': e => /Open|Wimbledon|Roland/i.test(e.title) ? ['Eurosport', 'HBO Max'] : ['Polsat Sport', 'Polsat Box Go'],
+  'tennis/wta': e => /Open|Wimbledon|Roland/i.test(e.title) ? ['Eurosport', 'HBO Max'] : new Date(e.start).getFullYear() <= 2026 ? ['Canal+ Sport'] : ['Eleven Sports'],
+  'basketball/nba': ['Eurosport 3/4', 'HBO Max', 'Player', 'TVP Sport (wybrane)', 'NBA League Pass'],
+  'hockey/nhl': ['DAZN'],
+  'M': e => ['TVN', 'Eurosport 1', 'HBO Max', 'Player'].concat(/Wisla|Wisła|Zakopane/i.test(e.title) ? ['TVP'] : []),
+  'W': e => ['Eurosport 1', 'HBO Max', 'Player'].concat(/Wisla|Wisła|Zakopane/i.test(e.title) ? ['TVP'] : [])
+};
+function tvOf(e){
+  const s = subOf(e) || {};
+  const own = String(s.tv || '').split(',').map(x => x.trim()).filter(Boolean);
+  const r = TV_PL[s.ref];
+  const pl = own.length ? own : (typeof r === 'function' ? r(e) : (r || []));
+  const m = String(e.info || '').match(/TV: (.+)$/);
+  const other = m ? m[1].split(',').map(x => x.trim()).filter(x => x && !pl.includes(x)) : [];
+  return {pl, other};
+}
+function tvLine(e){
+  const t = tvOf(e);
+  if (!t.pl.length && !t.other.length) return '';
+  return `<div class="tv">📺 ${t.pl.length ? '<b>' + esc(t.pl.join(' · ')) + '</b>' : ''}${t.other.length ? `<span class="tvo">${t.pl.length ? ' · ' : ''}${esc(t.other.join(', '))}</span>` : ''}</div>`;
+}
+const infoNoTv = e => String(e.info || '').replace(/(^|\s·\s)TV: .+$/, '').trim();
+
 /* ---------- Składy meczowe (tryb „Potwierdzone”) ----------
    ESPN publikuje wyjściowe składy ~1h przed meczem. Sprawdzamy mecze standby od -3h do +2h od startu. */
 function lineupFrom(j){
@@ -568,8 +616,25 @@ function reschedule(){
   }
   watch.sort((a,b) => a.at - b.at);
   if (window.Android && Android.lineupWatch) Android.lineupWatch(JSON.stringify(watch.slice(0,24)));
+  publishWidget();
 }
 const fmtOff = m => m >= 1440 ? (m/1440) + (m === 1440 ? ' dzień' : ' dni') : m >= 60 ? (m/60) + ' h' : m + ' min';
+
+/* ---------- Widżet na ekranie głównym ----------
+   Najbliższe wydarzenia wg aktualnego trybu (wszystkie / Polacy / Potwierdzone), z „gdzie oglądać”. */
+function publishWidget(){
+  if (!(window.Android && Android.widget)) return;
+  const now = Date.now();
+  const items = visibleEvents().filter(e => e.end > now).slice(0, 8).map(e => {
+    const t = tvOf(e), p = e.pl && S.set.pl ? (isConfirmed(e) ? '🇵🇱 ' : '🇵🇱? ') : '';
+    const who = e.pl && e.pl.conf && e.pl.conf.length ? e.pl.conf.join(', ') : (e.pl && e.pl.who) || '';
+    return {start:e.start, end:e.end, allDay:!!e.allDay, title:p + e.title,
+            line:[t.pl.length ? '📺 ' + t.pl.slice(0, 2).join(' · ') : (t.other.length ? '📺 ' + t.other.slice(0, 2).join(', ') : ''), S.set.pl && who ? '🇵🇱 ' + who : ''].filter(Boolean).join('  '),
+            color:(subOf(e) || {}).color || '#ff8a5b'};
+  });
+  const mode = !S.set.pl ? 'Wszystkie' : S.set.plConf ? '🇵🇱 ✔ Potwierdzone' : '🇵🇱 Polacy';
+  try{ Android.widget(JSON.stringify({mode, items})); }catch(_){}
+}
 
 /* ---------- Pomocnicze ---------- */
 const $ = s => document.querySelector(s);
@@ -599,6 +664,7 @@ function render(){
   $('#cfBtn').classList.toggle('on', !!(S.set.pl && S.set.plConf));
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
   ({up:vUpcoming, cal:vCalendar, subs:vSubs, set:vSettings})[tab]();
+  publishWidget();
 }
 
 function plBadge(e){
@@ -615,8 +681,8 @@ function evRow(e){
     <div class="bar" style="background:${s.color}"></div>
     <div class="t">${e.allDay ? 'cały<br>dzień' : hm(e.start)}</div>
     <div class="m"><div class="n">${esc(e.title)}</div>
-      <div class="s"><span class="tag">${esc(s.name)}</span>${f.mute ? '<span class="tag">🔕</span>' : ''}${esc(e.info || e.loc)}</div>
-      ${plBadge(e)}</div></div>`;
+      <div class="s"><span class="tag">${esc(s.name)}</span>${f.mute ? '<span class="tag">🔕</span>' : ''}${esc(infoNoTv(e) || e.loc)}</div>
+      ${tvLine(e)}${plBadge(e)}</div></div>`;
 }
 
 function vUpcoming(){
@@ -740,7 +806,7 @@ function openEvent(key){
     <p>🗓 ${fmtTime(e)}${e.allDay ? ' (cały dzień)' : ''}</p>
     ${e.loc ? `<p>📍 ${esc(e.loc)}</p>` : ''}
     ${e.pl && e.pl.lineupAt ? `<p>📋 Skład meczowy: ${e.pl.conf && e.pl.conf.length ? '<b>w wyjściowym: ' + esc(e.pl.conf.join(', ')) + '</b>' : 'nikt z Polaków w wyjściowym'}${e.pl.bench && e.pl.bench.length ? '<br>na ławce: ' + esc(e.pl.bench.join(', ')) : ''}<br><small>sprawdzono ${hm(e.pl.lineupAt)}</small></p>` : ''}
-    ${e.pl ? `<p>${e.pl.lvl === 'yes' ? '🇵🇱 <b>Polacy na pewno</b>' : '🇵🇱? <b>Standby</b>'}${e.pl.who ? ': ' + esc(e.pl.who) : ''}${e.pl.why && e.pl.lvl === 'maybe' ? `<br><small>${esc(e.pl.why)}</small>` : e.pl.why && !e.pl.who ? ' · ' + esc(e.pl.why) : ''}</p>` : ''}${e.info ? `<p style="white-space:pre-wrap;color:var(--mut)">${esc(e.info)}</p>` : ''}
+    ${e.pl ? `<p>${e.pl.lvl === 'yes' ? '🇵🇱 <b>Polacy na pewno</b>' : '🇵🇱? <b>Standby</b>'}${e.pl.who ? ': ' + esc(e.pl.who) : ''}${e.pl.why && e.pl.lvl === 'maybe' ? `<br><small>${esc(e.pl.why)}</small>` : e.pl.why && !e.pl.who ? ' · ' + esc(e.pl.why) : ''}</p>` : ''}${(() => { const t = tvOf(e); return t.pl.length || t.other.length ? `<p>📺 ${t.pl.length ? '<b>' + esc(t.pl.join(' · ')) + '</b>' : ''}${t.other.length ? `<br><small>inne: ${esc(t.other.join(', '))}</small>` : ''}</p>` : ''; })()}${infoNoTv(e) ? `<p style="white-space:pre-wrap;color:var(--mut)">${esc(infoNoTv(e))}</p>` : ''}
     <div class="row" style="margin-top:14px">
       <button class="btn acc" id="toCal">+ Do kalendarza Google</button>
       <button class="btn" id="mute">${f.mute ? '🔔 Włącz przypomnienia' : '🔕 Bez przypomnień'}</button>
@@ -834,6 +900,8 @@ function openSub(id){
     <label>Nazwa</label><input id="sN" value="${esc(s.name)}">
     ${s.src !== 'manual' ? `<label>Filtr (słowa po przecinku)</label><input id="sF" value="${esc(s.filter || '')}">` : ''}
     <label>Kolor</label><div class="chips" id="sC">${COLORS.map(c => `<button class="chip ${c === s.color ? 'on' : ''}" data-c="${c}" style="background:${c};width:30px;height:30px;padding:0"></button>`).join('')}</div>
+    <label>Gdzie oglądać (twoje, po przecinku; puste = domyślne: ${esc((typeof TV_PL[s.ref] === 'function' ? ['zależnie od meczu'] : TV_PL[s.ref] || ['brak']).join(', '))})</label>
+    <input id="sTv" value="${esc(s.tv || '')}" placeholder="np. Canal+ Sport, STS TV">
     <label>Polacy w tym źródle</label>
     <div class="chips" id="sP">${[['auto','automatycznie'],['always','zawsze (polska liga)'],['never','pomijaj']]
       .map(([v,l]) => `<button class="chip ${(s.plMode || 'auto') === v ? 'on' : ''}" data-p="${v}">${l}</button>`).join('')}</div>
@@ -849,7 +917,7 @@ function openSub(id){
     $('#sP').querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x === b)); s._plDirty = true; };
   $('#sC').onclick = e => { const b = e.target.closest('[data-c]'); if (!b) return; s.color = b.dataset.c;
     $('#sC').querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x === b)); };
-  $('#sSave').onclick = () => { s.name = $('#sN').value.trim() || s.name; const f = $('#sF');
+  $('#sSave').onclick = () => { s.name = $('#sN').value.trim() || s.name; s.tv = $('#sTv').value.trim(); const f = $('#sF');
     const changed = f && f.value.trim() !== (s.filter || ''); if (f) s.filter = f.value.trim();
     const pd = s._plDirty; delete s._plDirty;
     save(); closeSheet(); render(); if (changed || (pd && S.set.pl)) syncSub(s.id); };

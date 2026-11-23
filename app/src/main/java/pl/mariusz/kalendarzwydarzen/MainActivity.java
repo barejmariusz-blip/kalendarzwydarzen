@@ -238,6 +238,10 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void lineupWatch(String json) { Lineups.scheduleAll(MainActivity.this, json); }
 
+        /** {mode, items:[{start,end,allDay,title,line,color}]} — dane widżetu na ekranie głównym. */
+        @JavascriptInterface
+        public void widget(String json) { EventsWidget.save(MainActivity.this, json); }
+
         @JavascriptInterface
         public void test(String title, String body) { Alarms.notify(MainActivity.this, 99, title, body); }
     }
