@@ -16,6 +16,7 @@ APK: **Releases → latest → kalendarz-wydarzen.apk** (budowany automatycznie 
 | Źródło | Klucz | Co daje | Uwagi |
 |---|---|---|---|
 | **ESPN** | brak | UFC, F1, IndyCar, Ligue 1, Eredivisie, Liga Konferencji, Liga Narodów, mecze towarzyskie, ATP, WTA, Bundesliga, PL, La Liga, Serie A, LM, LE, NBA, NHL, NFL | Nieoficjalne API. Działa bez rejestracji, ale może się zmienić bez ostrzeżenia. |
+| **FIS** | brak | Skoki: Puchar Świata mężczyzn i kobiet | Oficjalny kalendarz ICS. W trybie „Polacy” apka czyta listę startową lub wyniki konkursu (do 10 dni przed) i oznacza tylko potwierdzonych Polaków. |
 | **TheSportsDB (kolejki)** | darmowy `123` | Ekstraklasa, PlusLiga, Liga Mistrzów EHF, MotoGP | Darmowy klucz oddaje pełną kolejkę. Apka szuka bieżącej kolejki i bierze 6 kolejnych. ESPN nie ma Ekstraklasy. |
 | **TheSportsDB (sezon)** | darmowy `123` | KSW | Darmowo do ~15 wydarzeń na sezon, a KSW ma ok. 12 gal rocznie, więc wystarcza. |
 | **Kalendarz ICS** | brak | Wszystko, co ma kalendarz online (federacje, kluby, publiczne kalendarze Google) | Najbardziej uniwersalne. Tędy KSW, boks, freak fighty itp. |

@@ -102,6 +102,8 @@ const ESPN = [
   {g:'Reprezentacje', n:'Mecze towarzyskie', p:'soccer/fifa.friendly'},
   {g:'Siatkówka', n:'PlusLiga', src:'tsdbr', id:'5619', rounds:26},
   {g:'Piłka ręczna', n:'Liga Mistrzów EHF', src:'tsdbr', id:'4980', rounds:14},
+  {g:'Skoki narciarskie', n:'Puchar Świata – mężczyźni', src:'fis', id:'M'},
+  {g:'Skoki narciarskie', n:'Puchar Świata – kobiety', src:'fis', id:'W'},
   {g:'Tenis', n:'ATP', p:'tennis/atp'},
   {g:'Tenis', n:'WTA', p:'tennis/wta'},
   {g:'Koszykówka', n:'NBA', p:'basketball/nba'},
@@ -275,6 +277,17 @@ const Sources = {
     }
     return out;
   },
+  /* FIS: oficjalny kalendarz ICS; każdy konkurs ma link do listy startowej / wyników */
+  async fis(sub){
+    const d = new Date(), season = d.getMonth() >= 6 ? d.getFullYear() + 1 : d.getFullYear();
+    const r = await http(`https://www.fis-ski.com/DB/services/public/icalendar-feed-fis-events.html?seasoncode=${season}&sectorcode=JP&categorycode=WC&gendercode=${sub.ref}`);
+    if (r.status < 200 || r.status >= 300) throw new Error('HTTP ' + r.status);
+    return parseICS(r.body).map(e => {
+      const m = (e.info || '').match(/https:\/\/www\.fis-ski\.com\/DB\/general\/results\.html\?[^\s\\]+/);
+      return {...e, id:'fis:'+e.uid, title:e.title.replace(/ - Ski Jumping World Cup/, ' –'), info:(e.info.match(/Round 1 loc: [0-9:]+/) || [''])[0].replace('Round 1 loc:', 'start (czas lokalny):'),
+              url:m ? m[0] : '', part:{fis:m ? m[0] : ''}};
+    });
+  },
   async ics(sub){
     const r = await http(sub.ref.replace(/^webcal:/i, 'https:'));
     if (r.status < 200 || r.status >= 300) throw new Error('HTTP ' + r.status);
@@ -382,6 +395,28 @@ async function plAnnotate(sub, list){
   if (mode === 'never'){ list.forEach(e => e.pl = null); return; }
   if (mode === 'always'){ list.forEach(e => e.pl = {lvl:'yes', who:'', why:sub.name}); return; }
   const ref = sub.ref || '';
+  // Skoki: tylko z opublikowanej listy startowej / wyników FIS — nic nie zakładamy
+  if (sub.src === 'fis'){
+    S.fisCache = S.fisCache || {};
+    for (const e of list){
+      e.pl = null;
+      const url = e.part && e.part.fis; if (!url) continue;
+      if (e.start > Date.now() + 10*DAY || e.end < Date.now() - 3*DAY) { const c = S.fisCache[url]; if (c) e.pl = c.pl; continue; }
+      const c = S.fisCache[url];
+      if (c && Date.now() - c.t < (c.pl ? 12 : 3) * 36e5){ e.pl = c.pl; continue; }
+      try{
+        const r = await http(url); if (r.status !== 200) continue;
+        const doc = new DOMParser().parseFromString(r.body, 'text/html'), names = myNames();
+        const poles = [...doc.querySelectorAll('a.table-row[href*="athlete-biography"]')].filter(a => {
+          const nat = (a.querySelector('.country__name-short') || {}).textContent || '';
+          return nat.trim() === 'POL' || hasAny(a.textContent, names);
+        }).map(a => ((a.querySelector('.justify-left.bold') || {}).textContent || '').trim().replace(/\s+/g, ' ')).filter(Boolean);
+        e.pl = poles.length ? {lvl:'yes', who:poles.join(', '), why:'lista startowa FIS'} : null;
+        S.fisCache[url] = {t:Date.now(), pl:e.pl};
+      }catch(_){}
+    }
+    return;
+  }
   // Kluby ESPN: składy drużyn występujących w pobranych meczach
   const teamSport = sub.src === 'espn' && !/^(mma|racing|tennis)\//.test(ref);
   const rosters = {};
@@ -568,7 +603,7 @@ function vCalendar(){
 
 function vSubs(){
   const cnt = id => Object.values(S.events).filter(e => e.sub === id && e.end > Date.now()).length;
-  const SRC = {espn:'ESPN', tsdb:'TheSportsDB', tsdbr:'TheSportsDB', tsdbs:'TheSportsDB', ics:'Kalendarz ICS', manual:'Ręczne'};
+  const SRC = {fis:'FIS', espn:'ESPN', tsdb:'TheSportsDB', tsdbr:'TheSportsDB', tsdbs:'TheSportsDB', ics:'Kalendarz ICS', manual:'Ręczne'};
   $('#view').innerHTML = `<button class="btn acc" style="width:100%;margin-bottom:12px" onclick="openAdd()">+ Dodaj co obserwować</button>` +
     (S.subs.map(s => `<div class="card" data-sub="${s.id}">
       <div class="row"><span style="width:12px;height:12px;border-radius:50%;background:${s.color}"></span>
@@ -594,7 +629,7 @@ function vSettings(){
     <input id="plN" value="${esc(S.set.plNames)}">
     <label>Polskie kluby (słowa kluczowe w nazwie meczu)</label>
     <input id="plC" value="${esc(S.set.plClubs)}">
-    <small>Pewne: polska liga, KSW, reprezentacja, Polak na karcie walk lub w drabince, polski klub. Standby: Polak w kadrze klubu, ale może nie zagrać. Nic nie jest zakładane z góry: tenis dopiero po publikacji drabinki, skoki i kalendarze z linków tylko gdy w opisie jest nazwisko z listy „Moi zawodnicy”.</small></div>
+    <small>Pewne: polska liga, KSW, reprezentacja, Polak na karcie walk lub w drabince, polski klub. Standby: Polak w kadrze klubu, ale może nie zagrać. Nic nie jest zakładane z góry: tenis dopiero po publikacji drabinki, skoki dopiero po publikacji listy startowej FIS (zwykle 1–2 dni przed konkursem), kalendarze z linków tylko gdy w opisie jest nazwisko z listy „Moi zawodnicy”.</small></div>
   <div class="card"><b>Domyślne przypomnienia</b><div class="chips" style="margin-top:8px" id="remChips">${remChips(S.set.remind)}</div>
     <small>Dla nowych obserwowanych. Każde źródło można ustawić osobno.</small></div>
   <div class="card"><b>Zakres pobierania</b>
@@ -699,6 +734,7 @@ function openRounds(x, flt){
   if ($('#tOk')) $('#tOk').onclick = () => { const v = $('#tq').value.trim(); if (v) mk(v + ' (' + x.n + ')', v); };
 }
 async function openLeague(x, flt){
+  if (x.src === 'fis') return addSub({src:'fis', ref:x.id, name:'Skoki PŚ ' + (x.id === 'M' ? 'mężczyźni' : 'kobiety') + (flt ? ' · ' + flt : ''), filter:flt});
   if (x.src === 'tsdbs') return addSub({src:'tsdbs', ref:x.id, name:x.n + (flt ? ' · ' + flt : ''), filter:flt});
   if (x.src === 'tsdbr' && x.yearly) return addSub({src:'tsdbr', ref:x.id, rounds:x.rounds, yearly:true, name:x.n + (flt ? ' · ' + flt : ''), filter:flt});
   if (x.src === 'tsdbr') return openRounds(x, flt);
