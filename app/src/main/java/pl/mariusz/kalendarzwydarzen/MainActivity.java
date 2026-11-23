@@ -65,6 +65,8 @@ public class MainActivity extends Activity {
             public boolean onRenderProcessGone(WebView view, android.webkit.RenderProcessGoneDetail detail) {
                 // Renderer padł (np. brak pamięci) — zamiast zamykać apkę: zapis + odtworzenie ekranu
                 Net.note(MainActivity.this, "WebView renderer gone (crash=" + detail.didCrash() + ")");
+                try { ((android.view.ViewGroup) view.getParent()).removeView(view); view.destroy(); } catch (Throwable ignored) { }
+                web = null;
                 recreate();
                 return true;
             }
@@ -96,8 +98,7 @@ public class MainActivity extends Activity {
             }
         });
 
-        if (state != null) web.restoreState(state);
-        else web.loadUrl("file:///android_asset/index.html");
+        web.loadUrl("file:///android_asset/index.html");
     }
 
     @Override
@@ -116,7 +117,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onSaveInstanceState(Bundle out) {
         super.onSaveInstanceState(out);
-        web.saveState(out);
+        // Stan strony trzymamy w localStorage — zapis stanu WebView niepotrzebny (i ryzykowny po padnięciu renderera)
     }
 
     @Override
@@ -133,6 +134,7 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
+        if (web == null) { super.onBackPressed(); return; }
         web.evaluateJavascript("window.onBack?window.onBack():false", v -> {
             if (!"true".equals(v)) MainActivity.super.onBackPressed();
         });

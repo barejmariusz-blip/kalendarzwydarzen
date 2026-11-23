@@ -89,7 +89,10 @@ final class Net {
                 StringWriter sw = new StringWriter();
                 e.printStackTrace(new PrintWriter(sw));
                 String s = sw.toString();
-                note(app, "[" + t.getName() + "] " + (s.length() > 3000 ? s.substring(0, 3000) : s));
+                String txt = "[" + t.getName() + "] " + (s.length() > 3000 ? s.substring(0, 3000) : s);
+                note(app, txt);
+                // Pokaż błąd od razu w powiadomieniu — widać go nawet gdy apka nie da się otworzyć
+                Alarms.notify(app, 199, "⚠ Błąd apki — zrób zrzut ekranu", txt.length() > 1500 ? txt.substring(0, 1500) : txt);
             } catch (Throwable ignored) { }
             if (prev != null) prev.uncaughtException(t, e);
         }

@@ -60,6 +60,7 @@ public class BgSync extends JobService {
                 @Override
                 public boolean onRenderProcessGone(WebView view, android.webkit.RenderProcessGoneDetail detail) {
                     Net.note(BgSync.this, "Tło: WebView renderer gone (crash=" + detail.didCrash() + ")");
+                    try { view.destroy(); } catch (Throwable ignored) { }
                     web = null;   // już nieużywalny
                     finish(false);
                     return true;
