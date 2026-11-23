@@ -122,15 +122,32 @@ const ymd = d => d.getFullYear() + String(d.getMonth()+1).padStart(2,'0') + Stri
 
 const Sources = {
   async espn(sub){
-    const from = new Date(Date.now() - DAY), to = new Date(Date.now() + S.set.horizon*DAY);
-    const j = await getJSON(`https://site.api.espn.com/apis/site/v2/sports/${sub.ref}/scoreboard?limit=500&dates=${ymd(from)}-${ymd(to)}`);
-    return (j.events || []).map(e => {
+    const base = `https://site.api.espn.com/apis/site/v2/sports/${sub.ref}`;
+    const map = e => {
       const c = (e.competitions || [])[0] || {};
-      const tv = [].concat(...(c.broadcasts || []).map(b => b.names || [])).join(', ');
-      const start = Date.parse(e.date);
+      const tv = [].concat(...(c.broadcasts || []).map(b => b.names || (b.media ? [b.media.shortName] : []))).filter(Boolean).join(', ');
+      const start = Date.parse(e.date || c.date);
       return {id:'espn:'+e.id, title:e.name || e.shortName, start, end:start + 2*36e5, allDay:false,
               loc:(c.venue && c.venue.fullName) || '', info:tv ? 'TV: '+tv : '', url:((e.links||[])[0]||{}).href || ''};
-    });
+    };
+    // Konkretna drużyna: pełny terminarz jednym zapytaniem
+    if (sub.team){
+      const j = await getJSON(`${base}/teams/${sub.team}/schedule?fixture=true`);
+      return (j.events || []).map(map);
+    }
+    // Gale i wyścigi: zakres dat działa
+    if (/^(mma|racing)\//.test(sub.ref)){
+      const from = new Date(Date.now() - DAY), to = new Date(Date.now() + S.set.horizon*DAY);
+      const j = await getJSON(`${base}/scoreboard?limit=500&dates=${ymd(from)}-${ymd(to)}`);
+      return (j.events || []).map(map);
+    }
+    // Ligi drużynowe: ESPN ignoruje zakres i oddaje jeden dzień → pytamy dzień po dniu
+    const days = Math.min(S.set.horizon, 45), out = {}; let okDays = 0, i = 0;
+    const worker = async () => { while (i < days){ const d = new Date(Date.now() + (i++)*DAY);
+      try{ const j = await getJSON(`${base}/scoreboard?dates=${ymd(d)}`); okDays++; (j.events || []).forEach(e => out[e.id] = map(e)); }catch(_){} } };
+    await Promise.all([worker(), worker(), worker(), worker()]);
+    if (!okDays) throw new Error('ESPN nie odpowiada dla ' + sub.ref);
+    return Object.values(out);
   },
   async tsdb(sub){
     const k = S.set.tsdbKey || '123';
@@ -405,9 +422,7 @@ function openAdd(){
       <button class="btn sm" id="aTsdb">+ TheSportsDB (ID)</button>
       <button class="btn sm" id="aMan">+ Wpisz ręcznie</button></div>
     <p><small>ICS działa z każdym kalendarzem online: federacje, kluby, publiczne kalendarze Google. Tak dodasz np. KSW czy galę bokserską, których nie ma w ESPN.</small></p>`);
-  $('#espnChips').onclick = ev => { const b = ev.target.closest('[data-i]'); if (!b) return; const x = ESPN[+b.dataset.i];
-    const flt = $('#flt').value.trim();
-    addSub({src:'espn', ref:x.p, name:x.n + (flt ? ' · ' + flt : ''), filter:flt}); };
+  $('#espnChips').onclick = ev => { const b = ev.target.closest('[data-i]'); if (!b) return; openLeague(ESPN[+b.dataset.i], $('#flt').value.trim()); };
   $('#aIcs').onclick = () => form('Kalendarz ICS', [['name','Nazwa','np. KSW'],['ref','Link .ics / webcal://','https://…'],['filter','Filtr (opcjonalnie)','']],
     v => addSub({src:'ics', ...v}));
   $('#aTsdb').onclick = () => form('TheSportsDB', [['name','Nazwa','np. Bundesliga'],['ref','ID ligi lub drużyny','np. 4331'],['kind','Typ: league / team','league']],
@@ -418,6 +433,25 @@ function openAdd(){
       if (!sub){ sub = mkSub({src:'manual', name:'Moje wydarzenia', items:[]}); S.subs.push(sub); }
       sub.items.push({id:'m:'+uid(), title:v.title || 'Wydarzenie', start:t, end:t + 2*36e5, allDay:false, loc:v.loc, info:'', url:''});
       save(); closeSheet(); syncAll(); });
+}
+async function openLeague(x, flt){
+  const solo = /^(mma|racing)\//.test(x.p);
+  sheet(`<h2>${esc(x.n)}</h2>
+    <button class="btn acc" id="lAll" style="width:100%">Cała ${solo ? 'federacja / seria' : 'liga'}${flt ? ' · filtr: ' + esc(flt) : ''}</button>
+    ${solo ? '' : `<label>…albo konkretna drużyna (pełny terminarz)</label><input id="tq" placeholder="Szukaj drużyny"><div class="chips" id="tl" style="margin-top:8px"><small>Ładuję drużyny…</small></div>`}
+    <div class="row" style="margin-top:14px"><button class="btn" onclick="openAdd()">Wstecz</button></div>`);
+  $('#lAll').onclick = () => addSub({src:'espn', ref:x.p, name:x.n + (flt ? ' · ' + flt : ''), filter:flt});
+  if (solo) return;
+  let teams = [];
+  try{ const j = await getJSON(`https://site.api.espn.com/apis/site/v2/sports/${x.p}/teams?limit=200`);
+    teams = (((j.sports||[])[0]||{}).leagues||[{}])[0].teams.map(t => t.team).map(t => ({id:t.id, n:t.displayName}))
+      .sort((a,b) => a.n.localeCompare(b.n)); }catch(_){}
+  const box = $('#tl'); if (!box) return;
+  const draw = q => box.innerHTML = teams.length ? teams.filter(t => t.n.toLowerCase().includes(q.toLowerCase()))
+      .map(t => `<button class="chip" data-t="${t.id}">${esc(t.n)}</button>`).join('') : '<small>Nie udało się pobrać listy drużyn</small>';
+  draw(''); $('#tq').oninput = e => draw(e.target.value);
+  box.onclick = e => { const b = e.target.closest('[data-t]'); if (!b) return; const t = teams.find(z => z.id === b.dataset.t);
+    addSub({src:'espn', ref:x.p, team:t.id, name:t.n + ' (' + x.n + ')', filter:flt}); };
 }
 function form(title, fields, cb){
   sheet(`<h2>${title}</h2>${fields.map(([k,l,ph,type]) => `<label>${l}</label><input id="f_${k}" type="${type || 'text'}" placeholder="${esc(ph)}" value="${k === 'kind' ? 'league' : ''}">`).join('')}

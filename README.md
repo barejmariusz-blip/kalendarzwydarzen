@@ -20,6 +20,8 @@ APK: **Releases → latest → kalendarz-wydarzen.apk** (budowany automatycznie 
 | **TheSportsDB** | darmowy `123` / premium | Ligi i drużyny po ID | Darmowy klucz zwraca tylko **1** najbliższe wydarzenie i 10 lig. Sensowne tylko z premium (~9$/mies.). |
 | **Ręcznie** | — | Pojedyncze wydarzenie | Na szybko, gdy nie ma źródła. |
 
+ESPN: dla lig drużynowych można obserwować **całą ligę** (pobieranie dzień po dniu, do 45 dni) albo **konkretną drużynę** (pełny terminarz klubu jednym zapytaniem).
+
 Do każdego źródła można dodać **filtr** (słowa po przecinku), np. ESPN Bundesliga + `Bayern` daje tylko mecze Bayernu, a UFC + `Prochazka` tylko jego walki.
 
 ## Architektura
