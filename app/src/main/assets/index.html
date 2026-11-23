@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Kalendarz Wydarzeń</title>
+<style>
+:root{--bg:#0b0d12;--card:#151924;--card2:#1c2130;--line:#262c3d;--tx:#e8ebf2;--mut:#8a93a8;--acc:#ff8a5b;--ok:#4cd6a0;--bad:#ff5c6c}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.4 system-ui,-apple-system,Roboto,sans-serif}
+header{position:sticky;top:0;z-index:5;background:var(--bg);padding:14px 16px 10px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--line)}
+header h1{font-size:19px;margin:0;flex:1}
+main{padding:12px 14px 96px}
+nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:#10131b;border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+nav button{flex:1;background:none;border:0;color:var(--mut);padding:10px 0 12px;font-size:12px}
+nav button b{display:block;font-size:20px;font-weight:400;margin-bottom:2px}
+nav button.on{color:var(--acc)}
+.btn{background:var(--card2);color:var(--tx);border:1px solid var(--line);border-radius:10px;padding:9px 13px;font-size:14px}
+.btn.acc{background:var(--acc);border-color:var(--acc);color:#1a0e08;font-weight:600}
+.btn.sm{padding:5px 9px;font-size:13px}
+.btn.bad{color:var(--bad)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:10px}
+.day{color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.06em;margin:16px 4px 6px}
+.day.today{color:var(--acc)}
+.ev{display:flex;gap:12px;align-items:flex-start}
+.ev .t{min-width:46px;font-weight:600;font-variant-numeric:tabular-nums}
+.ev .bar{width:4px;align-self:stretch;border-radius:4px}
+.ev .m{flex:1;min-width:0}
+.ev .n{font-weight:600}
+.ev .s{color:var(--mut);font-size:13px;margin-top:2px}
+.ev.past{opacity:.45}
+.tag{display:inline-block;font-size:11px;padding:2px 7px;border-radius:20px;background:var(--card2);color:var(--mut);margin-right:4px}
+.empty{text-align:center;color:var(--mut);padding:40px 20px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+label{display:block;color:var(--mut);font-size:13px;margin:12px 0 4px}
+input,select,textarea{width:100%;background:var(--card2);color:var(--tx);border:1px solid var(--line);border-radius:10px;padding:10px;font:inherit}
+.sheet-bg{position:fixed;inset:0;background:#0009;z-index:20;display:none}
+.sheet{position:fixed;left:0;right:0;bottom:0;max-height:88vh;overflow:auto;background:#121621;border-radius:18px 18px 0 0;padding:16px 16px 28px;z-index:21;display:none;border-top:1px solid var(--line)}
+.sheet h2{margin:0 0 6px;font-size:18px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{background:var(--card2);border:1px solid var(--line);border-radius:20px;padding:6px 11px;font-size:13px;color:var(--tx)}
+.chip.on{border-color:var(--acc);color:var(--acc)}
+.grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.grid .h{color:var(--mut);font-size:11px;text-align:center}
+.grid .c{background:var(--card);border-radius:8px;min-height:46px;padding:4px;font-size:12px;position:relative}
+.grid .c.o{opacity:.35}.grid .c.td{outline:1px solid var(--acc)}
+.grid .c.sel{background:var(--card2)}
+.dots{display:flex;flex-wrap:wrap;gap:2px;margin-top:4px}.dots i{width:6px;height:6px;border-radius:50%}
+.toast{position:fixed;left:50%;bottom:84px;transform:translateX(-50%);background:#222838;padding:9px 14px;border-radius:10px;font-size:14px;z-index:30;display:none;max-width:90%}
+.warn{background:#2a1d14;border-color:#5a3a22;color:#ffc9a8;font-size:13px}
+small{color:var(--mut)}
+</style>
+</head>
+<body>
+<header><h1 id="title">Nadchodzące</h1><button class="btn sm" id="syncBtn">⟳ Odśwież</button></header>
+<main id="view"></main>
+<nav>
+  <button data-tab="up" class="on"><b>☰</b>Nadchodzące</button>
+  <button data-tab="cal"><b>▦</b>Kalendarz</button>
+  <button data-tab="subs"><b>★</b>Obserwowane</button>
+  <button data-tab="set"><b>⚙</b>Ustawienia</button>
+</nav>
+<div class="sheet-bg" id="sheetBg"></div>
+<div class="sheet" id="sheet"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+/* =========================================================================
+   Kalendarz Wydarzeń — szkic v0.1
+   Obserwujesz ligę / federację / drużynę / kalendarz ICS → apka pobiera
+   terminy → kalendarz w apce + przypomnienia (+ wpis do kalendarza systemowego).
+   ========================================================================= */
+
+const KEY = 'kw-v1';
+const DAY = 864e5;
+const COLORS = ['#ff8a5b','#4cd6a0','#5b9dff','#ffd25b','#c77dff','#ff5c8a','#5be0ff','#a3e635'];
+
+/* ---------- Katalog źródeł ESPN (bez klucza, nieoficjalne API) ---------- */
+const ESPN = [
+  {g:'Walki', n:'UFC', p:'mma/ufc'},
+  {g:'Motorsport', n:'Formuła 1', p:'racing/f1'},
+  {g:'Piłka nożna', n:'Ekstraklasa', p:'soccer/pol.1'},
+  {g:'Piłka nożna', n:'Bundesliga', p:'soccer/ger.1'},
+  {g:'Piłka nożna', n:'Premier League', p:'soccer/eng.1'},
+  {g:'Piłka nożna', n:'La Liga', p:'soccer/esp.1'},
+  {g:'Piłka nożna', n:'Serie A', p:'soccer/ita.1'},
+  {g:'Piłka nożna', n:'Liga Mistrzów', p:'soccer/uefa.champions'},
+  {g:'Piłka nożna', n:'Liga Europy', p:'soccer/uefa.europa'},
+  {g:'Koszykówka', n:'NBA', p:'basketball/nba'},
+  {g:'Hokej', n:'NHL', p:'hockey/nhl'},
+  {g:'Futbol amer.', n:'NFL', p:'football/nfl'}
+];
+
+/* ---------- Stan ---------- */
+let S = load();
+function load(){
+  try{ const s = JSON.parse(localStorage.getItem(KEY)); if(s && s.v===1) return s; }catch(e){}
+  return {v:1, subs:[], events:{}, flags:{}, set:{remind:[1440,60,0], tsdbKey:'123', horizon:60, lastSync:0}};
+}
+function save(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){ toast('Brak miejsca na dane'); } }
+const uid = () => Math.random().toString(36).slice(2,9);
+
+/* ---------- HTTP przez most natywny (bez CORS), w przeglądarce fetch ---------- */
+const pend = {}; let reqN = 1;
+window.onHttp = (id, status, body) => { const p = pend[id]; if(!p) return; delete pend[id]; p({status, body}); };
+function http(url){
+  if (window.Android && Android.http){
+    return new Promise(res => { const id = reqN++; pend[id] = res; Android.http(id, url);
+      setTimeout(() => { if(pend[id]){ delete pend[id]; res({status:0, body:'timeout'}); } }, 30000); });
+  }
+  return fetch(url).then(r => r.text().then(b => ({status:r.status, body:b}))).catch(e => ({status:0, body:String(e)}));
+}
+async function getJSON(url){
+  const r = await http(url);
+  if (r.status < 200 || r.status >= 300) throw new Error('HTTP ' + r.status);
+  return JSON.parse(r.body);
+}
+
+/* ---------- Adaptery źródeł: każdy zwraca [{id,title,start,end,allDay,loc,info,url}] ---------- */
+const ymd = d => d.getFullYear() + String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0');
+
+const Sources = {
+  async espn(sub){
+    const from = new Date(Date.now() - DAY), to = new Date(Date.now() + S.set.horizon*DAY);
+    const j = await getJSON(`https://site.api.espn.com/apis/site/v2/sports/${sub.ref}/scoreboard?limit=500&dates=${ymd(from)}-${ymd(to)}`);
+    return (j.events || []).map(e => {
+      const c = (e.competitions || [])[0] || {};
+      const tv = [].concat(...(c.broadcasts || []).map(b => b.names || [])).join(', ');
+      const start = Date.parse(e.date);
+      return {id:'espn:'+e.id, title:e.name || e.shortName, start, end:start + 2*36e5, allDay:false,
+              loc:(c.venue && c.venue.fullName) || '', info:tv ? 'TV: '+tv : '', url:((e.links||[])[0]||{}).href || ''};
+    });
+  },
+  async tsdb(sub){
+    const k = S.set.tsdbKey || '123';
+    const ep = sub.kind === 'team' ? 'eventsnext.php' : 'eventsnextleague.php';
+    const j = await getJSON(`https://www.thesportsdb.com/api/v1/json/${encodeURIComponent(k)}/${ep}?id=${encodeURIComponent(sub.ref)}`);
+    return (j.events || []).map(e => {
+      const ts = e.strTimestamp ? Date.parse(e.strTimestamp.replace(' ','T') + (/[zZ+]/.test(e.strTimestamp) ? '' : 'Z'))
+               : Date.parse(e.dateEvent + 'T' + (e.strTime || '00:00:00') + 'Z');
+      return {id:'tsdb:'+e.idEvent, title:e.strEvent, start:ts, end:ts + 2*36e5, allDay:!e.strTime || e.strTime==='00:00:00',
+              loc:[e.strVenue, e.strCity, e.strCountry].filter(Boolean).join(', '), info:e.strTVStation ? 'TV: '+e.strTVStation : '', url:''};
+    });
+  },
+  async ics(sub){
+    const r = await http(sub.ref.replace(/^webcal:/i, 'https:'));
+    if (r.status < 200 || r.status >= 300) throw new Error('HTTP ' + r.status);
+    return parseICS(r.body).map(e => ({...e, id:'ics:'+e.uid}));
+  },
+  async manual(sub){ return sub.items || []; }
+};
+
+/* ---------- Parser ICS (VEVENT, DTSTART/DTEND z TZID, UTC lub DATE) ---------- */
+function parseICS(txt){
+  const lines = txt.replace(/\r\n[ \t]/g,'').replace(/\n[ \t]/g,'').split(/\r?\n/);
+  const out = []; let cur = null;
+  const unesc = s => s.replace(/\\n/gi,'\n').replace(/\\([,;\\])/g,'$1');
+  for (const ln of lines){
+    if (ln === 'BEGIN:VEVENT'){ cur = {}; continue; }
+    if (ln === 'END:VEVENT'){
+      if (cur && cur.start){
+        out.push({uid:cur.uid || (cur.title+cur.start), title:cur.title || '(bez tytułu)', start:cur.start,
+                  end:cur.end || cur.start + (cur.allDay ? DAY : 2*36e5), allDay:!!cur.allDay,
+                  loc:cur.loc || '', info:(cur.desc || '').slice(0,400), url:cur.url || ''});
+      }
+      cur = null; continue;
+    }
+    if (!cur) continue;
+    const i = ln.indexOf(':'); if (i < 0) continue;
+    const head = ln.slice(0,i), val = ln.slice(i+1);
+    const [name, ...params] = head.split(';');
+    const P = Object.fromEntries(params.map(p => p.split('=')));
+    if (name === 'SUMMARY') cur.title = unesc(val);
+    else if (name === 'LOCATION') cur.loc = unesc(val);
+    else if (name === 'DESCRIPTION') cur.desc = unesc(val);
+    else if (name === 'UID') cur.uid = val;
+    else if (name === 'URL') cur.url = val;
+    else if (name === 'DTSTART' || name === 'DTEND'){
+      const t = icsTime(val, P);
+      if (name === 'DTSTART'){ cur.start = t.ms; cur.allDay = t.allDay; } else cur.end = t.ms;
+    }
+  }
+  return out;
+}
+function icsTime(v, P){
+  const m = v.match(/^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})?(Z)?)?$/);
+  if (!m) return {ms:Date.parse(v), allDay:false};
+  const [_, y, mo, d, h, mi, s, z] = m;
+  if (h === undefined) return {ms:new Date(+y, mo-1, +d).getTime(), allDay:true};
+  if (z) return {ms:Date.UTC(+y, mo-1, +d, +h, +mi, +(s||0)), allDay:false};
+  if (P.TZID) return {ms:zonedToUtc(+y, mo-1, +d, +h, +mi, +(s||0), P.TZID.replace(/"/g,'')), allDay:false};
+  return {ms:new Date(+y, mo-1, +d, +h, +mi, +(s||0)).getTime(), allDay:false};
+}
+function zonedToUtc(y, mo, d, h, mi, s, tz){
+  const want = Date.UTC(y, mo, d, h, mi, s);
+  const off = t => { try{
+      const p = Object.fromEntries(new Intl.DateTimeFormat('en-US',{timeZone:tz,hourCycle:'h23',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'})
+        .formatToParts(t).map(x => [x.type, x.value]));
+      return Date.UTC(+p.year, p.month-1, +p.day, +p.hour, +p.minute, +p.second) - t;
+    }catch(e){ return 0; } };
+  let t = want - off(want); t = want - off(t); return t;
+}
+
+/* ---------- Synchronizacja ---------- */
+let syncing = false;
+async function syncAll(manual){
+  if (syncing) return; syncing = true; $('#syncBtn').textContent = '⟳ …';
+  let ok = 0, fail = [];
+  for (const sub of S.subs.filter(s => s.on !== false)){
+    try{
+      const list = await Sources[sub.src](sub);
+      const kw = (sub.filter || '').toLowerCase().split(',').map(x => x.trim()).filter(Boolean);
+      for (const k of Object.keys(S.events)) if (S.events[k].sub === sub.id) delete S.events[k];
+      for (const e of list){
+        if (!e.start || isNaN(e.start)) continue;
+        if (kw.length && !kw.some(w => (e.title + ' ' + e.loc).toLowerCase().includes(w))) continue;
+        const key = sub.id + '|' + e.id;
+        S.events[key] = {...e, key, sub:sub.id};
+      }
+      sub.lastOk = Date.now(); sub.err = ''; ok++;
+    }catch(err){ sub.err = String(err.message || err); fail.push(sub.name); }
+  }
+  // Sprzątanie: wydarzenia starsze niż 30 dni
+  for (const k of Object.keys(S.events)) if (S.events[k].end < Date.now() - 30*DAY) delete S.events[k];
+  S.set.lastSync = Date.now(); save(); reschedule(); render();
+  syncing = false; $('#syncBtn').textContent = '⟳ Odśwież';
+  if (manual || fail.length) toast(fail.length ? 'Błąd: ' + fail.join(', ') : `Zaktualizowano (${ok})`);
+}
+
+/* ---------- Przypomnienia ---------- */
+function reschedule(){
+  const now = Date.now(), list = [];
+  for (const e of Object.values(S.events)){
+    const sub = subOf(e); if (!sub || sub.on === false) continue;
+    const f = S.flags[e.key] || {}; if (f.hidden || f.mute) continue;
+    for (const off of (sub.remind || S.set.remind)){
+      const at = e.start - off*6e4; if (at <= now) continue;
+      list.push({at, title:(off === 0 ? '▶ Start: ' : '⏰ ') + e.title,
+                 body:(off === 0 ? 'Właśnie się zaczyna' : 'Za ' + fmtOff(off)) + ' · ' + fmtTime(e) + (e.info ? ' · ' + e.info : '')});
+    }
+  }
+  list.sort((a,b) => a.at - b.at);
+  if (window.Android && Android.schedule) Android.schedule(JSON.stringify(list.slice(0,48)));
+}
+const fmtOff = m => m >= 1440 ? (m/1440) + (m === 1440 ? ' dzień' : ' dni') : m >= 60 ? (m/60) + ' h' : m + ' min';
+
+/* ---------- Pomocnicze ---------- */
+const $ = s => document.querySelector(s);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const subOf = e => S.subs.find(s => s.id === e.sub);
+const DN = ['niedz.','pon.','wt.','śr.','czw.','pt.','sob.'];
+const MN = ['stycznia','lutego','marca','kwietnia','maja','czerwca','lipca','sierpnia','września','października','listopada','grudnia'];
+const MN1 = ['Styczeń','Luty','Marzec','Kwiecień','Maj','Czerwiec','Lipiec','Sierpień','Wrzesień','Październik','Listopad','Grudzień'];
+const hm = t => new Date(t).toLocaleTimeString('pl-PL',{hour:'2-digit',minute:'2-digit'});
+const fmtTime = e => { const d = new Date(e.start); return `${DN[d.getDay()]} ${d.getDate()} ${MN[d.getMonth()]}` + (e.allDay ? '' : ', ' + hm(e.start)); };
+const dayKey = t => { const d = new Date(t); return d.getFullYear()*1e4 + d.getMonth()*100 + d.getDate(); };
+function toast(t){ const el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(() => el.style.display = 'none', 2600); }
+function visibleEvents(){
+  return Object.values(S.events).filter(e => { const s = subOf(e); return s && s.on !== false && !(S.flags[e.key] || {}).hidden; })
+    .sort((a,b) => a.start - b.start);
+}
+
+/* ---------- Widoki ---------- */
+let tab = 'up', calMonth = null, calSel = null;
+const TITLES = {up:'Nadchodzące', cal:'Kalendarz', subs:'Obserwowane', set:'Ustawienia'};
+
+function render(){
+  $('#title').textContent = TITLES[tab];
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
+  ({up:vUpcoming, cal:vCalendar, subs:vSubs, set:vSettings})[tab]();
+}
+
+function evRow(e){
+  const s = subOf(e), f = S.flags[e.key] || {}, past = e.end < Date.now();
+  return `<div class="card ev ${past ? 'past' : ''}" data-ev="${esc(e.key)}">
+    <div class="bar" style="background:${s.color}"></div>
+    <div class="t">${e.allDay ? 'cały<br>dzień' : hm(e.start)}</div>
+    <div class="m"><div class="n">${esc(e.title)}</div>
+      <div class="s"><span class="tag">${esc(s.name)}</span>${f.mute ? '<span class="tag">🔕</span>' : ''}${esc(e.info || e.loc)}</div></div></div>`;
+}
+
+function vUpcoming(){
+  const list = visibleEvents().filter(e => e.end > Date.now() - 3*36e5);
+  if (!S.subs.length){
+    $('#view').innerHTML = `<div class="empty"><p style="font-size:40px;margin:0">★</p><p>Nic jeszcze nie obserwujesz.</p>
+      <button class="btn acc" onclick="openAdd()">+ Dodaj co obserwować</button></div>`; return;
+  }
+  if (!list.length){ $('#view').innerHTML = `<div class="empty">Brak nadchodzących wydarzeń.<br><small>Odśwież albo sprawdź źródła w „Obserwowane”.</small></div>`; return; }
+  let html = '', last = null; const today = dayKey(Date.now()), tmr = dayKey(Date.now() + DAY);
+  for (const e of list){
+    const k = dayKey(e.start);
+    if (k !== last){ const d = new Date(e.start);
+      html += `<div class="day ${k === today ? 'today' : ''}">${k === today ? 'Dziś · ' : k === tmr ? 'Jutro · ' : ''}${DN[d.getDay()]} ${d.getDate()} ${MN[d.getMonth()]}</div>`; last = k; }
+    html += evRow(e);
+  }
+  $('#view').innerHTML = html;
+}
+
+function vCalendar(){
+  const now = new Date(); if (!calMonth) calMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const y = calMonth.getFullYear(), m = calMonth.getMonth();
+  const first = new Date(y, m, 1), startOff = (first.getDay() + 6) % 7;
+  const byDay = {}; for (const e of visibleEvents()) (byDay[dayKey(e.start)] = byDay[dayKey(e.start)] || []).push(e);
+  let cells = ''; const tdk = dayKey(Date.now());
+  const total = Math.ceil((startOff + new Date(y, m+1, 0).getDate()) / 7) * 7;
+  for (let i = 0; i < total; i++){
+    const d = new Date(y, m, 1 - startOff + i), k = dayKey(d), evs = byDay[k] || [];
+    cells += `<div class="c ${d.getMonth() !== m ? 'o' : ''} ${k === tdk ? 'td' : ''} ${k === calSel ? 'sel' : ''}" data-day="${k}">${d.getDate()}
+      <div class="dots">${evs.slice(0,6).map(e => `<i style="background:${subOf(e).color}"></i>`).join('')}</div></div>`;
+  }
+  const sel = calSel ? (byDay[calSel] || []) : [];
+  $('#view').innerHTML = `<div class="row" style="justify-content:space-between;margin-bottom:10px">
+      <button class="btn sm" id="pm">‹</button><b>${MN1[m]} ${y}</b><button class="btn sm" id="nm">›</button></div>
+    <div class="grid">${['pon','wt','śr','czw','pt','sob','nd'].map(x => `<div class="h">${x}</div>`).join('')}${cells}</div>
+    <div style="margin-top:12px">${calSel ? (sel.length ? sel.map(evRow).join('') : '<div class="empty">Brak wydarzeń tego dnia</div>') : '<div class="empty"><small>Stuknij dzień, żeby zobaczyć wydarzenia</small></div>'}</div>`;
+  $('#pm').onclick = () => { calMonth = new Date(y, m-1, 1); calSel = null; render(); };
+  $('#nm').onclick = () => { calMonth = new Date(y, m+1, 1); calSel = null; render(); };
+}
+
+function vSubs(){
+  const cnt = id => Object.values(S.events).filter(e => e.sub === id && e.end > Date.now()).length;
+  const SRC = {espn:'ESPN', tsdb:'TheSportsDB', ics:'Kalendarz ICS', manual:'Ręczne'};
+  $('#view').innerHTML = `<button class="btn acc" style="width:100%;margin-bottom:12px" onclick="openAdd()">+ Dodaj co obserwować</button>` +
+    (S.subs.map(s => `<div class="card" data-sub="${s.id}">
+      <div class="row"><span style="width:12px;height:12px;border-radius:50%;background:${s.color}"></span>
+        <b style="flex:1">${esc(s.name)}</b><span class="tag">${SRC[s.src]}</span></div>
+      <div class="s" style="color:var(--mut);font-size:13px;margin-top:6px">
+        ${s.on === false ? '⏸ wstrzymane · ' : ''}${cnt(s.id)} nadchodzących${s.filter ? ' · filtr: ' + esc(s.filter) : ''}
+        · przypomnienia: ${(s.remind || S.set.remind).map(m => m ? fmtOff(m) : 'na start').join(', ') || 'brak'}
+        ${s.err ? `<br><span style="color:var(--bad)">Błąd: ${esc(s.err)}</span>` : ''}</div></div>`).join('') || '<div class="empty">Pusto</div>');
+}
+
+function vSettings(){
+  const st = window.Android && Android.notifyState ? Android.notifyState() : 'granted';
+  $('#view').innerHTML = `
+  ${st !== 'granted' ? `<div class="card warn">Powiadomienia są wyłączone, przypomnienia nie dotrą.<br><br><button class="btn sm" onclick="Android.askNotify()">Włącz powiadomienia</button></div>` : ''}
+  <div class="card"><b>Domyślne przypomnienia</b><div class="chips" style="margin-top:8px" id="remChips">${remChips(S.set.remind)}</div>
+    <small>Dla nowych obserwowanych. Każde źródło można ustawić osobno.</small></div>
+  <div class="card"><b>Zakres pobierania</b>
+    <label>Ile dni do przodu</label><input type="number" id="hor" value="${S.set.horizon}" min="7" max="365"></div>
+  <div class="card"><b>TheSportsDB – klucz API</b>
+    <label>Darmowy klucz „123” zwraca tylko 1 najbliższe wydarzenie. Pełny wynik daje klucz premium (~9$/mies.).</label>
+    <input id="tkey" value="${esc(S.set.tsdbKey)}"></div>
+  <div class="card"><b>Dane</b><div class="row" style="margin-top:8px">
+    <button class="btn sm" id="exp">Eksport kopii</button>
+    <label class="btn sm" style="margin:0;color:var(--tx)">Import kopii<input type="file" id="imp" accept=".json,application/json" style="display:none"></label>
+    <button class="btn sm" id="tst">Test powiadomienia</button></div>
+    <small>Ostatnia synchronizacja: ${S.set.lastSync ? new Date(S.set.lastSync).toLocaleString('pl-PL') : 'nigdy'}</small></div>
+  <p style="text-align:center"><small>Kalendarz Wydarzeń · szkic v0.1</small></p>`;
+  bindRemChips($('#remChips'), S.set.remind, v => { S.set.remind = v; save(); });
+  $('#hor').onchange = e => { S.set.horizon = Math.max(7, Math.min(365, +e.target.value || 60)); save(); };
+  $('#tkey').onchange = e => { S.set.tsdbKey = e.target.value.trim() || '123'; save(); };
+  $('#exp').onclick = () => {
+    const name = 'kalendarz-wydarzen-' + new Date().toISOString().slice(0,10) + '.json', data = JSON.stringify(S);
+    if (window.Android && Android.saveFile) toast(Android.saveFile(name, data, 'application/json') === 'ok' ? 'Zapisano w Pobranych' : 'Nie udało się zapisać');
+    else { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([data])); a.download = name; a.click(); }
+  };
+  $('#imp').onchange = e => { const f = e.target.files[0]; if (!f) return; f.text().then(t => {
+    try{ const s = JSON.parse(t); if (s.v !== 1) throw 0; S = s; save(); reschedule(); toast('Wczytano kopię'); render(); }catch(_){ toast('Zły plik'); } }); };
+  $('#tst').onclick = () => { if (window.Android && Android.test) Android.test('⏰ Test', 'Tak będzie wyglądać przypomnienie'); else toast('Tylko w apce'); };
+}
+
+const REM_OPTS = [10080, 2880, 1440, 360, 120, 60, 30, 15, 0];
+const remLabel = m => m === 0 ? 'na start' : fmtOff(m) + ' przed';
+const remChips = cur => REM_OPTS.map(m => `<button class="chip ${cur.includes(m) ? 'on' : ''}" data-m="${m}">${remLabel(m)}</button>`).join('');
+function bindRemChips(box, cur, cb){
+  box.onclick = e => { const b = e.target.closest('[data-m]'); if (!b) return; const m = +b.dataset.m;
+    const i = cur.indexOf(m); i >= 0 ? cur.splice(i,1) : cur.push(m); cur.sort((a,b) => b-a);
+    b.classList.toggle('on'); cb(cur); reschedule(); };
+}
+
+/* ---------- Arkusze ---------- */
+function sheet(html){ $('#sheet').innerHTML = html; $('#sheet').style.display = $('#sheetBg').style.display = 'block'; }
+function closeSheet(){ $('#sheet').style.display = $('#sheetBg').style.display = 'none'; }
+$('#sheetBg').onclick = closeSheet;
+window.onBack = () => { if ($('#sheet').style.display === 'block'){ closeSheet(); return true; } if (tab !== 'up'){ tab = 'up'; render(); return true; } return false; };
+
+function openEvent(key){
+  const e = S.events[key]; if (!e) return; const s = subOf(e), f = S.flags[key] || {};
+  sheet(`<span class="tag" style="color:${s.color}">${esc(s.name)}</span><h2 style="margin-top:8px">${esc(e.title)}</h2>
+    <p>🗓 ${fmtTime(e)}${e.allDay ? ' (cały dzień)' : ''}</p>
+    ${e.loc ? `<p>📍 ${esc(e.loc)}</p>` : ''}${e.info ? `<p style="white-space:pre-wrap;color:var(--mut)">${esc(e.info)}</p>` : ''}
+    <div class="row" style="margin-top:14px">
+      <button class="btn acc" id="toCal">+ Do kalendarza Google</button>
+      <button class="btn" id="mute">${f.mute ? '🔔 Włącz przypomnienia' : '🔕 Bez przypomnień'}</button>
+      ${e.url ? `<a class="btn" href="${esc(e.url)}">Szczegóły ↗</a>` : ''}
+      <button class="btn bad" id="hide">Ukryj</button></div>`);
+  $('#toCal').onclick = () => {
+    if (window.Android && Android.toCalendar) Android.toCalendar(e.title, e.start, e.end, e.loc || '', [e.info, 'Źródło: ' + s.name].filter(Boolean).join('\n'));
+    else toast('Tylko w apce');
+  };
+  $('#mute').onclick = () => { S.flags[key] = {...f, mute:!f.mute}; save(); reschedule(); closeSheet(); render(); };
+  $('#hide').onclick = () => { S.flags[key] = {...f, hidden:true}; save(); reschedule(); closeSheet(); render(); toast('Ukryto'); };
+}
+
+function openAdd(){
+  sheet(`<h2>Co obserwować?</h2>
+    <label>Gotowe ligi i federacje (ESPN)</label>
+    <div class="chips" id="espnChips">${ESPN.map((x,i) => `<button class="chip" data-i="${i}">${esc(x.n)}</button>`).join('')}</div>
+    <label>Filtr (opcjonalnie): drużyna, zawodnik, słowa po przecinku</label>
+    <input id="flt" placeholder="np. Bayern, Legia  albo  Prochazka">
+    <div class="row" style="margin-top:16px;border-top:1px solid var(--line);padding-top:12px">
+      <button class="btn sm" id="aIcs">+ Kalendarz ICS (link)</button>
+      <button class="btn sm" id="aTsdb">+ TheSportsDB (ID)</button>
+      <button class="btn sm" id="aMan">+ Wpisz ręcznie</button></div>
+    <p><small>ICS działa z każdym kalendarzem online: federacje, kluby, publiczne kalendarze Google. Tak dodasz np. KSW czy galę bokserską, których nie ma w ESPN.</small></p>`);
+  $('#espnChips').onclick = ev => { const b = ev.target.closest('[data-i]'); if (!b) return; const x = ESPN[+b.dataset.i];
+    const flt = $('#flt').value.trim();
+    addSub({src:'espn', ref:x.p, name:x.n + (flt ? ' · ' + flt : ''), filter:flt}); };
+  $('#aIcs').onclick = () => form('Kalendarz ICS', [['name','Nazwa','np. KSW'],['ref','Link .ics / webcal://','https://…'],['filter','Filtr (opcjonalnie)','']],
+    v => addSub({src:'ics', ...v}));
+  $('#aTsdb').onclick = () => form('TheSportsDB', [['name','Nazwa','np. Bundesliga'],['ref','ID ligi lub drużyny','np. 4331'],['kind','Typ: league / team','league']],
+    v => addSub({src:'tsdb', ...v, kind:v.kind === 'team' ? 'team' : 'league'}));
+  $('#aMan').onclick = () => form('Wydarzenie ręczne', [['title','Nazwa','np. KSW 110'],['when','Data i godzina','', 'datetime-local'],['loc','Miejsce / TV (opcjonalnie)','']],
+    v => { const t = Date.parse(v.when); if (isNaN(t)) return toast('Podaj datę');
+      let sub = S.subs.find(s => s.src === 'manual');
+      if (!sub){ sub = mkSub({src:'manual', name:'Moje wydarzenia', items:[]}); S.subs.push(sub); }
+      sub.items.push({id:'m:'+uid(), title:v.title || 'Wydarzenie', start:t, end:t + 2*36e5, allDay:false, loc:v.loc, info:'', url:''});
+      save(); closeSheet(); syncAll(); });
+}
+function form(title, fields, cb){
+  sheet(`<h2>${title}</h2>${fields.map(([k,l,ph,type]) => `<label>${l}</label><input id="f_${k}" type="${type || 'text'}" placeholder="${esc(ph)}" value="${k === 'kind' ? 'league' : ''}">`).join('')}
+    <div class="row" style="margin-top:14px"><button class="btn acc" id="fOk">Dodaj</button><button class="btn" onclick="openAdd()">Wstecz</button></div>`);
+  $('#fOk').onclick = () => { const v = {}; fields.forEach(([k]) => v[k] = $('#f_' + k).value.trim());
+    if (fields.some(([k]) => k === 'ref') && !v.ref) return toast('Uzupełnij pole'); cb(v); };
+}
+function mkSub(o){ return {id:uid(), on:true, color:COLORS[S.subs.length % COLORS.length], remind:S.set.remind.slice(), ...o}; }
+function addSub(o){
+  if (!o.name) o.name = o.ref;
+  S.subs.push(mkSub(o)); save(); closeSheet(); tab = 'subs'; render(); toast('Dodano, pobieram…'); syncAll();
+}
+
+function openSub(id){
+  const s = S.subs.find(x => x.id === id); if (!s) return;
+  sheet(`<h2>${esc(s.name)}</h2>
+    <label>Nazwa</label><input id="sN" value="${esc(s.name)}">
+    ${s.src !== 'manual' ? `<label>Filtr (słowa po przecinku)</label><input id="sF" value="${esc(s.filter || '')}">` : ''}
+    <label>Kolor</label><div class="chips" id="sC">${COLORS.map(c => `<button class="chip ${c === s.color ? 'on' : ''}" data-c="${c}" style="background:${c};width:30px;height:30px;padding:0"></button>`).join('')}</div>
+    <label>Przypomnienia</label><div class="chips" id="sR">${remChips(s.remind || [])}</div>
+    <div class="row" style="margin-top:16px">
+      <button class="btn acc" id="sSave">Zapisz</button>
+      <button class="btn" id="sPause">${s.on === false ? '▶ Wznów' : '⏸ Wstrzymaj'}</button>
+      <button class="btn bad" id="sDel">Usuń</button></div>`);
+  if (!s.remind) s.remind = S.set.remind.slice();
+  bindRemChips($('#sR'), s.remind, () => save());
+  $('#sC').onclick = e => { const b = e.target.closest('[data-c]'); if (!b) return; s.color = b.dataset.c;
+    $('#sC').querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x === b)); };
+  $('#sSave').onclick = () => { s.name = $('#sN').value.trim() || s.name; const f = $('#sF');
+    const changed = f && f.value.trim() !== (s.filter || ''); if (f) s.filter = f.value.trim();
+    save(); closeSheet(); render(); if (changed) syncAll(); };
+  $('#sPause').onclick = () => { s.on = s.on === false; save(); reschedule(); closeSheet(); render(); };
+  $('#sDel').onclick = () => { if (!confirm('Usunąć „' + s.name + '” i jego wydarzenia?')) return;
+    S.subs = S.subs.filter(x => x !== s);
+    for (const k of Object.keys(S.events)) if (S.events[k].sub === s.id) delete S.events[k];
+    save(); reschedule(); closeSheet(); render(); };
+}
+
+/* ---------- Zdarzenia ---------- */
+document.querySelector('nav').onclick = e => { const b = e.target.closest('[data-tab]'); if (!b) return; tab = b.dataset.tab; render(); window.scrollTo(0,0); };
+$('#view').onclick = e => {
+  const ev = e.target.closest('[data-ev]'); if (ev) return openEvent(ev.dataset.ev);
+  const sb = e.target.closest('[data-sub]'); if (sb) return openSub(sb.dataset.sub);
+  const dy = e.target.closest('[data-day]'); if (dy){ calSel = +dy.dataset.day; render(); }
+};
+$('#syncBtn').onclick = () => syncAll(true);
+window.onNativeResume = () => { if (Date.now() - S.set.lastSync > 3*36e5 && S.subs.length) syncAll(); else render(); };
+
+render();
+if (window.Android && Android.notifyState && Android.notifyState() === 'ask') Android.askNotify();
+if (S.subs.length && Date.now() - S.set.lastSync > 3*36e5) syncAll();
+</script>
+</body>
+</html>
