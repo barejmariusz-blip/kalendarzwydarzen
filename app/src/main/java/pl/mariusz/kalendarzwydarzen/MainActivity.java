@@ -45,6 +45,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        Net.installCrashLog(this);
         Alarms.channels(this);
         BgSync.schedule(this);
 
@@ -60,6 +61,14 @@ public class MainActivity extends Activity {
         web.addJavascriptInterface(new Bridge(), "Android");
 
         web.setWebViewClient(new WebViewClient() {
+            @Override
+            public boolean onRenderProcessGone(WebView view, android.webkit.RenderProcessGoneDetail detail) {
+                // Renderer padł (np. brak pamięci) — zamiast zamykać apkę: zapis + odtworzenie ekranu
+                Net.note(MainActivity.this, "WebView renderer gone (crash=" + detail.didCrash() + ")");
+                recreate();
+                return true;
+            }
+
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
@@ -129,42 +138,22 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void deliver(int id, int status, String body) {
-        final String js = "window.onHttp&&window.onHttp(" + id + "," + status + "," + JSONObject.quote(body == null ? "" : body) + ")";
-        runOnUiThread(() -> { if (web != null) web.evaluateJavascript(js, null); });
-    }
-
     /** Wywoływane ze strony jako window.Android.* */
     class Bridge {
 
-        /** GET bez ograniczeń CORS. Wynik wraca przez window.onHttp(id, status, body). */
+        /** GET bez ograniczeń CORS. Sygnał wraca przez window.onHttp(id, status), treść przez body(id). */
         @JavascriptInterface
-        public void http(final int id, final String url) {
-            net.execute(() -> {
-                HttpURLConnection c = null;
-                try {
-                    c = (HttpURLConnection) new URL(url).openConnection();
-                    c.setConnectTimeout(15000);
-                    c.setReadTimeout(20000);
-                    c.setInstanceFollowRedirects(true);
-                    c.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) KalendarzWydarzen/0.1");
-                    c.setRequestProperty("Accept", "application/json, text/calendar, */*");
-                    int code = c.getResponseCode();
-                    InputStream in = code >= 400 ? c.getErrorStream() : c.getInputStream();
-                    ByteArrayOutputStream bo = new ByteArrayOutputStream();
-                    if (in != null) {
-                        byte[] buf = new byte[16384];
-                        int n;
-                        while ((n = in.read(buf)) > 0) bo.write(buf, 0, n);
-                        in.close();
-                    }
-                    deliver(id, code, bo.toString(StandardCharsets.UTF_8.name()));
-                } catch (Exception e) {
-                    deliver(id, 0, String.valueOf(e.getMessage()));
-                } finally {
-                    if (c != null) c.disconnect();
-                }
-            });
+        public void http(final int id, final String url) { Net.get(web, id, url); }
+
+        @JavascriptInterface
+        public String body(int id) { return Net.take(id); }
+
+        /** Ostatni błąd aplikacji (jednorazowo), "" gdy brak. */
+        @JavascriptInterface
+        public String lastCrash() {
+            String c = Alarms.prefs(MainActivity.this).getString("crash", "");
+            Alarms.prefs(MainActivity.this).edit().remove("crash").apply();
+            return c;
         }
 
         /** [{at, title, body}] — zastępuje wszystkie zaplanowane przypomnienia. */

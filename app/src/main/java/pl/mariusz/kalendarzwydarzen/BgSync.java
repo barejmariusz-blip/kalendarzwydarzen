@@ -54,7 +54,17 @@ public class BgSync extends JobService {
         if (appVisible) return false;
         params = p;
         try {
+            Net.installCrashLog(this);
             web = new WebView(getApplicationContext());
+            web.setWebViewClient(new android.webkit.WebViewClient() {
+                @Override
+                public boolean onRenderProcessGone(WebView view, android.webkit.RenderProcessGoneDetail detail) {
+                    Net.note(BgSync.this, "Tło: WebView renderer gone (crash=" + detail.didCrash() + ")");
+                    web = null;   // już nieużywalny
+                    finish(false);
+                    return true;
+                }
+            });
             WebSettings s = web.getSettings();
             s.setJavaScriptEnabled(true);
             s.setDomStorageEnabled(true);
@@ -95,36 +105,10 @@ public class BgSync extends JobService {
 
     class Bridge {
         @JavascriptInterface
-        public void http(final int id, final String url) {
-            net.execute(() -> {
-                int code = 0;
-                String body;
-                HttpURLConnection c = null;
-                try {
-                    c = (HttpURLConnection) new URL(url).openConnection();
-                    c.setConnectTimeout(15000);
-                    c.setReadTimeout(20000);
-                    c.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) KalendarzWydarzen/0.1");
-                    c.setRequestProperty("Accept", "application/json, text/calendar, */*");
-                    code = c.getResponseCode();
-                    InputStream in = code >= 400 ? c.getErrorStream() : c.getInputStream();
-                    ByteArrayOutputStream bo = new ByteArrayOutputStream();
-                    if (in != null) {
-                        byte[] buf = new byte[16384];
-                        int n;
-                        while ((n = in.read(buf)) > 0) bo.write(buf, 0, n);
-                        in.close();
-                    }
-                    body = bo.toString(StandardCharsets.UTF_8.name());
-                } catch (Exception e) {
-                    code = 0;
-                    body = String.valueOf(e.getMessage());
-                } finally {
-                    if (c != null) c.disconnect();
-                }
-                js("window.onHttp&&window.onHttp(" + id + "," + code + "," + JSONObject.quote(body) + ")");
-            });
-        }
+        public void http(final int id, final String url) { if (web != null) Net.get(web, id, url); }
+
+        @JavascriptInterface
+        public String body(int id) { return Net.take(id); }
 
         @JavascriptInterface
         public void schedule(String json) { Alarms.scheduleAll(BgSync.this, json); }

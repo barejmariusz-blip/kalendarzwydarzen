@@ -148,7 +148,10 @@ const uid = () => Math.random().toString(36).slice(2,9);
 
 /* ---------- HTTP przez most natywny (bez CORS), w przeglądarce fetch ---------- */
 const pend = {}; let reqN = 1;
-window.onHttp = (id, status, body) => { const p = pend[id]; if(!p) return; delete pend[id]; p({status, body}); };
+window.onHttp = (id, status, body) => {
+  if (body === undefined && window.Android && Android.body) body = Android.body(id);   // treść odbierana osobno (bez wklejania do JS)
+  const p = pend[id]; if(!p) return; delete pend[id]; p({status, body});
+};
 function http(url){
   if (window.Android && Android.http){
     return new Promise(res => { const id = reqN++; pend[id] = res; Android.http(id, url);
@@ -1127,6 +1130,14 @@ if (BG){
   })();
 } else {
   render();
+  // Ostatni błąd aplikacji (zapisany przy awarii) — do przekazania
+  try{
+    const crash = window.Android && Android.lastCrash ? Android.lastCrash() : '';
+    if (crash) sheet(`<h2>⚠ Apka została ostatnio zamknięta przez błąd</h2>
+      <p><small>Skopiuj i wyślij, żeby dało się to naprawić:</small></p>
+      <textarea readonly style="height:220px;font:11px monospace">${esc(crash)}</textarea>
+      <div class="row" style="margin-top:10px"><button class="btn acc" onclick="closeSheet()">OK</button></div>`);
+  }catch(_){}
   if (window.Android && Android.notifyState && Android.notifyState() === 'ask') Android.askNotify();
   if (S.subs.length && Date.now() - S.set.lastSync > 3*36e5) syncAll();
 }
