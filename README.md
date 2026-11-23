@@ -31,9 +31,9 @@ Do każdego źródła można dodać **filtr** (słowa po przecinku), np. ESPN Bu
 Przycisk w nagłówku. Zostają tylko wydarzenia z udziałem Polaków, w dwóch poziomach:
 
 - **🇵🇱 pewne:** polska liga lub federacja (Ekstraklasa, PlusLiga, KSW), reprezentacja, Polak na karcie walk (flaga z ESPN), Polak w drabince turnieju, polski klub.
-- **🇵🇱? standby:** Polak w kadrze klubu, ale może nie zagrać. Apka czyta skład klubu z ESPN (obywatelstwo, kontuzje, występy w sezonie) i podaje powód: gra regularnie, głównie z ławki, rzadko gra, nie zagrał w sezonie, kontuzja. Tenis bez znanej drabinki też trafia do standby.
+- **🇵🇱? standby:** Polak w kadrze klubu, ale może nie zagrać. Apka czyta skład klubu z ESPN (obywatelstwo, kontuzje, występy w sezonie) i podaje powód: gra regularnie, głównie z ławki, rzadko gra, nie zagrał w sezonie, kontuzja. Nic nie jest zakładane z góry: tenis pojawia się dopiero, gdy Polak jest w opublikowanej drabince, a wydarzenia bez danych o uczestnikach (np. skoki z kalendarza ICS) tylko wtedy, gdy w opisie jest nazwisko z listy „moi zawodnicy”.
 
-Do tego w ustawieniach: lista „moi zawodnicy” (łapani po nazwisku zawsze, np. Sochan, którego ESPN nie oznacza jako Polaka), słowa kluczowe polskich klubów i osobny tryb dla każdego źródła (auto / zawsze / standby / pomijaj).
+Do tego w ustawieniach: lista „moi zawodnicy” (łapani po nazwisku zawsze, np. Sochan, którego ESPN nie oznacza jako Polaka), słowa kluczowe polskich klubów i osobny tryb dla każdego źródła (auto / zawsze / pomijaj).
 
 ## Architektura
 

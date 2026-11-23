@@ -125,7 +125,11 @@ function load(){
 function migrate(s){
   const d = {pl:false, plMaybe:true, plRemindMaybe:true, plNames:'Sochan', plClubs:'Kielce, Płock, Legia, Lech Poznań, Jagiellonia, Raków, Pogoń Szczecin, Górnik Zabrze'};
   for (const k in d) if (s.set[k] === undefined) s.set[k] = d[k];
-  for (const x of s.subs) if (!x.plMode) x.plMode = DOMESTIC.has(x.ref) || x.src === 'manual' ? 'always' : x.src === 'ics' ? 'maybe' : 'auto';
+  for (const x of s.subs){
+    if (!x.plMode || x.plMode === 'maybe') x.plMode = DOMESTIC.has(x.ref) || x.src === 'manual' ? 'always' : 'auto';
+  }
+  // Bez zakładania: stare oznaczenia „drabinka nieznana” / „brak danych” znikają
+  for (const e of Object.values(s.events || {})) if (e.pl && e.pl.lvl === 'maybe' && !e.pl.who) e.pl = null;
   return s;
 }
 function save(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){ toast('Brak miejsca na dane'); } }
@@ -377,7 +381,6 @@ async function plAnnotate(sub, list){
   const mode = sub.plMode || 'auto', names = myNames(), clubs = plClubs();
   if (mode === 'never'){ list.forEach(e => e.pl = null); return; }
   if (mode === 'always'){ list.forEach(e => e.pl = {lvl:'yes', who:'', why:sub.name}); return; }
-  if (mode === 'maybe'){ list.forEach(e => e.pl = {lvl:'maybe', who:'', why:'brak danych o składzie'}); return; }
   const ref = sub.ref || '';
   // Kluby ESPN: składy drużyn występujących w pobranych meczach
   const teamSport = sub.src === 'espn' && !/^(mma|racing|tennis)\//.test(ref);
@@ -397,7 +400,7 @@ async function plAnnotate(sub, list){
     // Walki / tenis: flagi zawodników
     const poles = (part.ath || []).filter(a => PL_COUNTRY.test(a.c) || hasAny(a.n, names));
     if (poles.length){ e.pl = {lvl:'yes', who:[...new Set(poles.map(a => a.n))].join(', '), why:''}; continue; }
-    if (/^tennis\//.test(ref)){ if (!part.ath || !part.ath.length) e.pl = {lvl:'maybe', who:'', why:'drabinka jeszcze nieznana'}; continue; }
+    if (/^tennis\//.test(ref)) continue;   // tylko gdy Polak jest w opublikowanej drabince (wyżej)
     // Reprezentacja
     if ((part.teams || []).some(t => PL_COUNTRY.test(t.n))){ e.pl = {lvl:'yes', who:'Polska', why:'reprezentacja'}; continue; }
     // Polski klub (słowo kluczowe albo skład w większości polski)
@@ -591,7 +594,7 @@ function vSettings(){
     <input id="plN" value="${esc(S.set.plNames)}">
     <label>Polskie kluby (słowa kluczowe w nazwie meczu)</label>
     <input id="plC" value="${esc(S.set.plClubs)}">
-    <small>Pewne: polska liga, KSW, reprezentacja, Polak na karcie walk lub w drabince, polski klub. Standby: Polak w kadrze klubu, ale może nie zagrać.</small></div>
+    <small>Pewne: polska liga, KSW, reprezentacja, Polak na karcie walk lub w drabince, polski klub. Standby: Polak w kadrze klubu, ale może nie zagrać. Nic nie jest zakładane z góry: tenis dopiero po publikacji drabinki, skoki i kalendarze z linków tylko gdy w opisie jest nazwisko z listy „Moi zawodnicy”.</small></div>
   <div class="card"><b>Domyślne przypomnienia</b><div class="chips" style="margin-top:8px" id="remChips">${remChips(S.set.remind)}</div>
     <small>Dla nowych obserwowanych. Każde źródło można ustawić osobno.</small></div>
   <div class="card"><b>Zakres pobierania</b>
@@ -724,7 +727,7 @@ function form(title, fields, cb){
     if (fields.some(([k]) => k === 'ref') && !v.ref) return toast('Uzupełnij pole'); cb(v); };
 }
 function mkSub(o){ return {id:uid(), on:true, color:COLORS[S.subs.length % COLORS.length], remind:S.set.remind.slice(),
-  plMode:DOMESTIC.has(o.ref) || o.src === 'manual' ? 'always' : o.src === 'ics' ? 'maybe' : 'auto', ...o}; }
+  plMode:DOMESTIC.has(o.ref) || o.src === 'manual' ? 'always' : 'auto', ...o}; }
 function addSub(o){
   if (!o.name) o.name = o.ref;
   S.subs.push(mkSub(o)); save(); closeSheet(); tab = 'subs'; render(); toast('Dodano, pobieram…'); syncAll();
@@ -737,7 +740,7 @@ function openSub(id){
     ${s.src !== 'manual' ? `<label>Filtr (słowa po przecinku)</label><input id="sF" value="${esc(s.filter || '')}">` : ''}
     <label>Kolor</label><div class="chips" id="sC">${COLORS.map(c => `<button class="chip ${c === s.color ? 'on' : ''}" data-c="${c}" style="background:${c};width:30px;height:30px;padding:0"></button>`).join('')}</div>
     <label>Polacy w tym źródle</label>
-    <div class="chips" id="sP">${[['auto','automatycznie'],['always','zawsze (polska liga)'],['maybe','zawsze standby'],['never','pomijaj']]
+    <div class="chips" id="sP">${[['auto','automatycznie'],['always','zawsze (polska liga)'],['never','pomijaj']]
       .map(([v,l]) => `<button class="chip ${(s.plMode || 'auto') === v ? 'on' : ''}" data-p="${v}">${l}</button>`).join('')}</div>
     <label>Przypomnienia</label><div class="chips" id="sR">${remChips(s.remind || [])}</div>
     <div class="row" style="margin-top:16px">
