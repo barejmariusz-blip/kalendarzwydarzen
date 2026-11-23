@@ -36,6 +36,10 @@ Przycisk w nagłówku. Zostają tylko wydarzenia z udziałem Polaków, w dwóch 
 
 Do tego w ustawieniach: lista „moi zawodnicy” (łapani po nazwisku zawsze, np. Sochan, którego ESPN nie oznacza jako Polaka), słowa kluczowe polskich klubów i osobny tryb dla każdego źródła (auto / zawsze / pomijaj).
 
+### „Potwierdzone” ✔
+
+Drugi przycisk obok „Polacy”. Zostaje tylko to, co jest już przesądzone: Polak na karcie walk, w opublikowanej drabince, na liście startowej FIS albo **w wyjściowym składzie** meczu. Składy meczowe ESPN publikuje ok. godzinę przed meczem. Apka sprawdza je przy otwarciu i w tle (60 i 25 minut przed meczem, a potem co 10 minut do startu), a gdy Polak jest w pierwszej jedenastce, wysyła powiadomienie „🇵🇱 ✔ … w wyjściowym składzie”.
+
 ## Architektura
 
 ```

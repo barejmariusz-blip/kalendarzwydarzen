@@ -234,6 +234,10 @@ public class MainActivity extends Activity {
             return am == null || am.canScheduleExactAlarms();
         }
 
+        /** [{at, url, ids:{id:name}, title, start}] — sprawdzanie składów meczowych w tle. */
+        @JavascriptInterface
+        public void lineupWatch(String json) { Lineups.scheduleAll(MainActivity.this, json); }
+
         @JavascriptInterface
         public void test(String title, String body) { Alarms.notify(MainActivity.this, 99, title, body); }
     }
