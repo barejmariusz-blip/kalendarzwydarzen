@@ -19,6 +19,7 @@ APK: **Releases → latest → kalendarz-wydarzen.apk** (budowany automatycznie 
 | **FIS** | brak | Skoki: Puchar Świata mężczyzn i kobiet | Oficjalny kalendarz ICS. W trybie „Polacy” apka czyta listę startową lub wyniki konkursu (do 10 dni przed) i oznacza tylko potwierdzonych Polaków. |
 | **TheSportsDB (kolejki)** | darmowy `123` | Ekstraklasa, PlusLiga, Liga Mistrzów EHF, MotoGP | Darmowy klucz oddaje pełną kolejkę. Apka szuka bieżącej kolejki i bierze 6 kolejnych. ESPN nie ma Ekstraklasy. |
 | **TheSportsDB (sezon)** | darmowy `123` | KSW | Darmowo do ~15 wydarzeń na sezon, a KSW ma ok. 12 gal rocznie, więc wystarcza. |
+| **TheSportsDB (dzień po dniu)** | darmowy `123` | Boks | Gale z danego dnia, 45 dni do przodu. Pierwsze pobranie trwa ok. 1,5 minuty (limit zapytań), potem dni są pamiętane 12 h. TheSportsDB nie podaje narodowości bokserów, więc w trybie „Polacy” liczą się tylko nazwiska z listy „Moi zawodnicy”. |
 | **Kalendarz ICS** | brak | Wszystko, co ma kalendarz online (federacje, kluby, publiczne kalendarze Google) | Najbardziej uniwersalne. Tędy KSW, boks, freak fighty itp. |
 | **TheSportsDB** | darmowy `123` / premium | Ligi i drużyny po ID | Darmowy klucz zwraca tylko **1** najbliższe wydarzenie i 10 lig. Sensowne tylko z premium (~9$/mies.). |
 | **Ręcznie** | — | Pojedyncze wydarzenie | Na szybko, gdy nie ma źródła. |

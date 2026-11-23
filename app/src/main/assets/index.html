@@ -91,6 +91,7 @@ const COLORS = ['#ff8a5b','#4cd6a0','#5b9dff','#ffd25b','#c77dff','#ff5c8a','#5b
 const ESPN = [
   {g:'Walki', n:'UFC', p:'mma/ufc'},
   {g:'Walki', n:'KSW', src:'tsdbs', id:'4709'},
+  {g:'Walki', n:'Boks', src:'tsdbd', id:'4445'},
   {g:'Motorsport', n:'Formuła 1', p:'racing/f1'},
   {g:'Motorsport', n:'MotoGP', src:'tsdbr', id:'4407', rounds:22, yearly:true},
   {g:'Motorsport', n:'IndyCar', p:'racing/irl'},
@@ -284,6 +285,33 @@ const Sources = {
       }
     }
     return [];
+  },
+  /* TheSportsDB dzień po dniu (boks: darmowy klucz oddaje gale z danego dnia). Dni trzymane w pamięci 12 h. */
+  async tsdbd(sub){
+    const k = S.set.tsdbKey || '123', out = [], days = Math.min(S.set.horizon, 45);
+    S.dayCache = S.dayCache || {};
+    let okDays = 0;
+    for (let i = 0; i < days; i++){
+      const d = new Date(Date.now() + i*DAY), ds = d.toISOString().slice(0, 10), ck = sub.ref + '|' + ds;
+      let evs = S.dayCache[ck] && Date.now() - S.dayCache[ck].t < 12*36e5 ? S.dayCache[ck].v : null;
+      if (!evs){
+        try{
+          await sleep(2100);   // limit ~30 zapytań/min
+          const j = await getJSON(`https://www.thesportsdb.com/api/v1/json/${encodeURIComponent(k)}/eventsday.php?d=${ds}&l=${sub.ref}`);
+          evs = (j.events || []).map(e => {
+            const ts = e.strTimestamp ? Date.parse(e.strTimestamp.replace(' ','T') + (/[zZ+]/.test(e.strTimestamp) ? '' : 'Z')) : Date.parse(e.dateEvent + 'T00:00:00Z');
+            const noTime = !e.strTimestamp || /T00:00:00/.test(e.strTimestamp);
+            return {id:'tsdb:'+e.idEvent, title:e.strEvent, start:ts, end:ts + (noTime ? DAY : 5*36e5), allDay:noTime,
+                    loc:[e.strVenue, e.strCountry].filter(Boolean).join(', '), info:'', url:''};
+          });
+          S.dayCache[ck] = {t:Date.now(), v:evs};
+        }catch(_){ continue; }
+      }
+      okDays++; out.push(...evs);
+    }
+    for (const ck of Object.keys(S.dayCache)) if (Date.now() - S.dayCache[ck].t > 3*DAY) delete S.dayCache[ck];
+    if (!okDays) throw new Error('TheSportsDB nie odpowiada');
+    return out;
   },
   /* TheSportsDB cały sezon (darmowo max ~15 wydarzeń — wystarcza dla gal, np. KSW ~12/rok) */
   async tsdbs(sub){
@@ -856,7 +884,7 @@ function vCalendar(){
 
 function vSubs(){
   const cnt = id => Object.values(S.events).filter(e => e.sub === id && e.end > Date.now()).length;
-  const SRC = {fis:'FIS', espn:'ESPN', tsdb:'TheSportsDB', tsdbr:'TheSportsDB', tsdbs:'TheSportsDB', ics:'Kalendarz ICS', manual:'Ręczne'};
+  const SRC = {fis:'FIS', espn:'ESPN', tsdb:'TheSportsDB', tsdbr:'TheSportsDB', tsdbs:'TheSportsDB', tsdbd:'TheSportsDB', ics:'Kalendarz ICS', manual:'Ręczne'};
   $('#view').innerHTML = `<button class="btn acc" style="width:100%;margin-bottom:12px" onclick="openAdd()">+ Dodaj co obserwować</button>` +
     (S.subs.map(s => `<div class="card" data-sub="${s.id}">
       <div class="row"><span style="width:12px;height:12px;border-radius:50%;background:${s.color}"></span>
@@ -999,6 +1027,7 @@ function openRounds(x, flt){
 }
 async function openLeague(x, flt){
   if (x.src === 'fis') return addSub({src:'fis', ref:x.id, name:'Skoki PŚ ' + (x.id === 'M' ? 'mężczyźni' : 'kobiety') + (flt ? ' · ' + flt : ''), filter:flt});
+  if (x.src === 'tsdbd') return addSub({src:'tsdbd', ref:x.id, name:x.n + (flt ? ' · ' + flt : ''), filter:flt});
   if (x.src === 'tsdbs') return addSub({src:'tsdbs', ref:x.id, name:x.n + (flt ? ' · ' + flt : ''), filter:flt});
   if (x.src === 'tsdbr' && x.yearly) return addSub({src:'tsdbr', ref:x.id, rounds:x.rounds, yearly:true, name:x.n + (flt ? ' · ' + flt : ''), filter:flt});
   if (x.src === 'tsdbr') return openRounds(x, flt);
