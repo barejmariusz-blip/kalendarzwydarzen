@@ -15,7 +15,8 @@ APK: **Releases → latest → kalendarz-wydarzen.apk** (budowany automatycznie 
 
 | Źródło | Klucz | Co daje | Uwagi |
 |---|---|---|---|
-| **ESPN** | brak | UFC, F1, Ekstraklasa, Bundesliga, PL, La Liga, Serie A, LM, LE, NBA, NHL, NFL | Nieoficjalne API. Działa bez rejestracji, ale może się zmienić bez ostrzeżenia. |
+| **ESPN** | brak | UFC, F1, Bundesliga, PL, La Liga, Serie A, LM, LE, NBA, NHL, NFL | Nieoficjalne API. Działa bez rejestracji, ale może się zmienić bez ostrzeżenia. |
+| **TheSportsDB (kolejki)** | darmowy `123` | Ekstraklasa | Darmowy klucz oddaje pełną kolejkę. Apka szuka bieżącej kolejki i bierze 6 kolejnych. ESPN nie ma Ekstraklasy. |
 | **Kalendarz ICS** | brak | Wszystko, co ma kalendarz online (federacje, kluby, publiczne kalendarze Google) | Najbardziej uniwersalne. Tędy KSW, boks, freak fighty itp. |
 | **TheSportsDB** | darmowy `123` / premium | Ligi i drużyny po ID | Darmowy klucz zwraca tylko **1** najbliższe wydarzenie i 10 lig. Sensowne tylko z premium (~9$/mies.). |
 | **Ręcznie** | — | Pojedyncze wydarzenie | Na szybko, gdy nie ma źródła. |

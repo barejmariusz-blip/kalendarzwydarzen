@@ -80,7 +80,7 @@ const COLORS = ['#ff8a5b','#4cd6a0','#5b9dff','#ffd25b','#c77dff','#ff5c8a','#5b
 const ESPN = [
   {g:'Walki', n:'UFC', p:'mma/ufc'},
   {g:'Motorsport', n:'Formuła 1', p:'racing/f1'},
-  {g:'Piłka nożna', n:'Ekstraklasa', p:'soccer/pol.1'},
+  {g:'Piłka nożna', n:'Ekstraklasa', src:'tsdbr', id:'4422', rounds:34},
   {g:'Piłka nożna', n:'Bundesliga', p:'soccer/ger.1'},
   {g:'Piłka nożna', n:'Premier League', p:'soccer/eng.1'},
   {g:'Piłka nożna', n:'La Liga', p:'soccer/esp.1'},
@@ -95,10 +95,17 @@ const ESPN = [
 /* ---------- Stan ---------- */
 let S = load();
 function load(){
-  try{ const s = JSON.parse(localStorage.getItem(KEY)); if(s && s.v===1) return s; }catch(e){}
+  try{ const s = JSON.parse(localStorage.getItem(KEY)); if(s && s.v===1){
+    // ESPN nie ma Ekstraklasy → przenosimy na TheSportsDB (kolejki)
+    for (const x of s.subs) if (x.src === 'espn' && x.ref === 'soccer/pol.1'){
+      x.src = 'tsdbr'; x.ref = '4422'; x.rounds = 34; x.err = '';
+      if (x.team){ x.filter = x.filter || x.name.replace(/\s*\(Ekstraklasa\)$/, ''); delete x.team; }
+    }
+    return s; } }catch(e){}
   return {v:1, subs:[], events:{}, flags:{}, set:{remind:[1440,60,0], tsdbKey:'123', horizon:60, lastSync:0}};
 }
 function save(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){ toast('Brak miejsca na dane'); } }
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 const uid = () => Math.random().toString(36).slice(2,9);
 
 /* ---------- HTTP przez most natywny (bez CORS), w przeglądarce fetch ---------- */
@@ -159,6 +166,31 @@ const Sources = {
       return {id:'tsdb:'+e.idEvent, title:e.strEvent, start:ts, end:ts + 2*36e5, allDay:!e.strTime || e.strTime==='00:00:00',
               loc:[e.strVenue, e.strCity, e.strCountry].filter(Boolean).join(', '), info:e.strTVStation ? 'TV: '+e.strTVStation : '', url:''};
     });
+  },
+  /* TheSportsDB po kolejkach: darmowy klucz oddaje pełną kolejkę (np. Ekstraklasa) */
+  async tsdbr(sub){
+    const k = S.set.tsdbKey || '123', now = Date.now(), d = new Date();
+    const y = d.getFullYear(), season = d.getMonth() >= 6 ? `${y}-${y+1}` : `${y-1}-${y}`;
+    const cache = {};
+    const round = async r => {
+      if (cache[r]) return cache[r];
+      await sleep(2100); // limit ~30 zapytań/min
+      const j = await getJSON(`https://www.thesportsdb.com/api/v1/json/${encodeURIComponent(k)}/eventsround.php?id=${sub.ref}&r=${r}&s=${season}`);
+      return cache[r] = (j.events || []).map(e => {
+        const ts = e.strTimestamp ? Date.parse(e.strTimestamp.replace(' ','T') + (/[zZ+]/.test(e.strTimestamp) ? '' : 'Z'))
+                 : Date.parse(e.dateEvent + 'T' + (e.strTime || '00:00:00') + 'Z');
+        return {id:'tsdb:'+e.idEvent, title:e.strEvent, start:ts, end:ts + 2*36e5, allDay:!e.strTime || e.strTime === '00:00:00',
+                loc:[e.strVenue, e.strCity].filter(Boolean).join(', '), info:'Kolejka ' + r + (e.strTVStation ? ' · TV: ' + e.strTVStation : ''), url:''};
+      });
+    };
+    const done = evs => evs.length && evs.every(e => e.end < now);
+    // Szukanie binarne pierwszej kolejki, która nie jest jeszcze w całości rozegrana
+    let lo = 1, hi = sub.rounds || 34;
+    while (lo < hi){ const mid = (lo + hi) >> 1; if (done(await round(mid))) lo = mid + 1; else hi = mid; }
+    const out = [];
+    for (let r = lo; r <= Math.min(lo + 5, sub.rounds || 34); r++) out.push(...await round(r));
+    sub.teams = [...new Set(Object.values(cache).flat().flatMap(e => e.title.split(' vs ')))].sort((a,b) => a.localeCompare(b, 'pl'));
+    return out;
   },
   async ics(sub){
     const r = await http(sub.ref.replace(/^webcal:/i, 'https:'));
@@ -337,7 +369,7 @@ function vCalendar(){
 
 function vSubs(){
   const cnt = id => Object.values(S.events).filter(e => e.sub === id && e.end > Date.now()).length;
-  const SRC = {espn:'ESPN', tsdb:'TheSportsDB', ics:'Kalendarz ICS', manual:'Ręczne'};
+  const SRC = {espn:'ESPN', tsdb:'TheSportsDB', tsdbr:'TheSportsDB', ics:'Kalendarz ICS', manual:'Ręczne'};
   $('#view').innerHTML = `<button class="btn acc" style="width:100%;margin-bottom:12px" onclick="openAdd()">+ Dodaj co obserwować</button>` +
     (S.subs.map(s => `<div class="card" data-sub="${s.id}">
       <div class="row"><span style="width:12px;height:12px;border-radius:50%;background:${s.color}"></span>
@@ -413,7 +445,7 @@ function openEvent(key){
 
 function openAdd(){
   sheet(`<h2>Co obserwować?</h2>
-    <label>Gotowe ligi i federacje (ESPN)</label>
+    <label>Gotowe ligi i federacje</label>
     <div class="chips" id="espnChips">${ESPN.map((x,i) => `<button class="chip" data-i="${i}">${esc(x.n)}</button>`).join('')}</div>
     <label>Filtr (opcjonalnie): drużyna, zawodnik, słowa po przecinku</label>
     <input id="flt" placeholder="np. Bayern, Legia  albo  Prochazka">
@@ -434,7 +466,22 @@ function openAdd(){
       sub.items.push({id:'m:'+uid(), title:v.title || 'Wydarzenie', start:t, end:t + 2*36e5, allDay:false, loc:v.loc, info:'', url:''});
       save(); closeSheet(); syncAll(); });
 }
+function openRounds(x, flt){
+  const known = (S.subs.find(z => z.src === 'tsdbr' && z.ref === x.id) || {}).teams || [];
+  sheet(`<h2>${esc(x.n)}</h2>
+    <button class="btn acc" id="lAll" style="width:100%">Cała liga${flt ? ' · filtr: ' + esc(flt) : ''}</button>
+    <label>…albo konkretna drużyna</label>
+    ${known.length ? `<div class="chips" id="tl">${known.map(t => `<button class="chip" data-t="${esc(t)}">${esc(t)}</button>`).join('')}</div>`
+      : `<div class="row"><input id="tq" placeholder="np. Legia" style="flex:1"><button class="btn" id="tOk">Dodaj</button></div>
+         <small>Pełna lista drużyn pojawi się po pierwszym pobraniu ligi.</small>`}
+    <div class="row" style="margin-top:14px"><button class="btn" onclick="openAdd()">Wstecz</button></div>`);
+  const mk = (name, f) => addSub({src:'tsdbr', ref:x.id, rounds:x.rounds, name, filter:f});
+  $('#lAll').onclick = () => mk(x.n + (flt ? ' · ' + flt : ''), flt);
+  if ($('#tl')) $('#tl').onclick = e => { const b = e.target.closest('[data-t]'); if (b) mk(b.dataset.t + ' (' + x.n + ')', b.dataset.t); };
+  if ($('#tOk')) $('#tOk').onclick = () => { const v = $('#tq').value.trim(); if (v) mk(v + ' (' + x.n + ')', v); };
+}
 async function openLeague(x, flt){
+  if (x.src === 'tsdbr') return openRounds(x, flt);
   const solo = /^(mma|racing)\//.test(x.p);
   sheet(`<h2>${esc(x.n)}</h2>
     <button class="btn acc" id="lAll" style="width:100%">Cała ${solo ? 'federacja / seria' : 'liga'}${flt ? ' · filtr: ' + esc(flt) : ''}</button>
