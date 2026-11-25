@@ -57,6 +57,14 @@ header .btn{white-space:nowrap;padding:6px 8px}
 header{gap:6px}
 .tv{margin-top:5px;font-size:12.5px;color:#cfd6e6}.tv b{font-weight:600;color:#fff}.tvo{color:var(--mut)}
 .res{margin-top:5px;font-size:12.5px;color:#ffd25b}
+.vis{flex:0 0 auto;border-radius:10px;position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.vis img{width:100%;height:100%;object-fit:contain}
+.vis.two img{position:absolute;width:68%;height:68%}
+.vis.two .i0{left:0;top:0}.vis.two .i1{right:0;bottom:0}
+.vis.ico{border-radius:50%}
+.ev .vis{align-self:center}
+.chip.ic{display:inline-flex;align-items:center;gap:5px}
+.chip.ic svg{opacity:.8}
 .toast{position:fixed;left:50%;bottom:84px;transform:translateX(-50%);background:#222838;padding:9px 14px;border-radius:10px;font-size:14px;z-index:30;display:none;max-width:90%}
 .warn{background:#2a1d14;border-color:#5a3a22;color:#ffc9a8;font-size:13px}
 small{color:var(--mut)}
@@ -117,6 +125,40 @@ const ESPN = [
   {g:'Hokej', n:'NHL', p:'hockey/nhl'},
   {g:'Futbol amer.', n:'NFL', p:'football/nfl'}
 ];
+
+/* ---------- Grafiki: ikony dyscyplin (własne SVG) ---------- */
+const ICON = {
+  football:'<circle cx="12" cy="12" r="9"/><path d="M12 7.5l3.2 2.3-1.2 3.8h-4l-1.2-3.8z"/><path d="M12 3v4.5M15.2 9.8l4.3-1.4M14 13.6l2.7 3.6M10 13.6l-2.7 3.6M8.8 9.8L4.5 8.4"/>',
+  mma:'<path d="M7 10V7a3 3 0 0 1 3-3h4a3 3 0 0 1 3 3v6a5 5 0 0 1-5 5h-1a4 4 0 0 1-4-4v-1"/><path d="M7 10h4a2 2 0 0 1 0 4H8M9 18v3h6v-3"/>',
+  boxing:'<path d="M6 9a5 5 0 0 1 5-5h2a5 5 0 0 1 5 5v3a5 5 0 0 1-5 5h-2a5 5 0 0 1-5-5z"/><path d="M6 10c-2 0-3 1-3 2.5S4 15 6 15M9 17v4h6v-4"/>',
+  racing:'<path d="M5 21V4"/><path d="M5 4h14l-2 4 2 4H5"/><path d="M9 4v8M13 4v8M5 8h14" stroke-width="1.2"/>',
+  moto:'<circle cx="6" cy="16" r="3.5"/><circle cx="18" cy="16" r="3.5"/><path d="M6 16l4-6h5l3 6M10 10l-1-3h-2M15 10l1-3h3"/>',
+  ski:'<path d="M3 20c6-1 11-5 18-14"/><circle cx="14" cy="5" r="1.6"/><path d="M13 7l-3 4 4 2-2 4M10 11l-3 1"/>',
+  volleyball:'<circle cx="12" cy="12" r="9"/><path d="M12 3c-2 4-2 8 0 9 3 1 7 0 9-2M12 12c-3 2-6 6-5 8M12 12c4 1 6 4 6 7"/>',
+  handball:'<circle cx="12" cy="12" r="9"/><path d="M5 8c4 1 10 1 14 0M5 16c4-1 10-1 14 0M12 3v18"/>',
+  tennis:'<circle cx="12" cy="12" r="9"/><path d="M5.5 5.5c3 3 3 10 0 13M18.5 5.5c-3 3-3 10 0 13"/>',
+  basketball:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3v18M5.6 5.6c3 3 3 9.8 0 12.8M18.4 5.6c-3 3-3 9.8 0 12.8"/>',
+  hockey:'<path d="M14 3l-4 14a2 2 0 0 1-2 1.5H4"/><ellipse cx="17" cy="18" rx="3.5" ry="1.6"/>',
+  amfootball:'<ellipse cx="12" cy="12" rx="9.5" ry="5.5" transform="rotate(-35 12 12)"/><path d="M9.5 14.5l5-5M10.5 11.5l2 2M12 10l2 2M9 13l2 2"/>',
+  star:'<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>'
+};
+const SPORT_BY_REF = {'4422':'football','4709':'mma','4445':'boxing','4407':'moto','5619':'volleyball','4980':'handball','M':'ski','W':'ski'};
+const sportOf = sub => {
+  if (!sub) return 'star';
+  if (sub.src === 'fis') return 'ski';
+  if (SPORT_BY_REF[sub.ref]) return SPORT_BY_REF[sub.ref];
+  const pre = String(sub.ref || '').split('/')[0];
+  return ({soccer:'football', mma:'mma', racing:'racing', tennis:'tennis', basketball:'basketball', hockey:'hockey', football:'amfootball'})[pre] || 'star';
+};
+const icon = (name, size) => `<svg viewBox="0 0 24 24" width="${size || 20}" height="${size || 20}" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${ICON[name] || ICON.star}</svg>`;
+// Herby / flagi z danych (ESPN, TheSportsDB); jak nie ma — ikona dyscypliny w kolorze źródła
+function visual(e, s, size){
+  size = size || 34;
+  const imgs = (e.img || []).filter(Boolean).slice(0, 2);
+  if (imgs.length === 2) return `<div class="vis two" style="width:${size}px;height:${size}px">${imgs.map((u, i) => `<img src="${esc(u)}" loading="lazy" class="i${i}" onerror="this.style.visibility='hidden'">`).join('')}</div>`;
+  if (imgs.length === 1) return `<div class="vis" style="width:${size}px;height:${size}px"><img src="${esc(imgs[0])}" loading="lazy" onerror="this.style.visibility='hidden'"></div>`;
+  return `<div class="vis ico" style="width:${size}px;height:${size}px;color:${s.color};background:${s.color}22">${icon(sportOf(s), Math.round(size * 0.58))}</div>`;
+}
 
 /* ---------- Stan ---------- */
 const DOMESTIC = new Set(['4422', '5619', '4709']);   // Ekstraklasa, PlusLiga, KSW
@@ -185,6 +227,14 @@ const Sources = {
       const start = Date.parse(e.date || c.date);
       // Uczestnicy (do trybu „Polacy”): drużyny z pierwszego spotkania, zawodnicy z całej karty / drabinki
       const teams = (c.competitors || []).filter(x => x.team).map(x => ({id:x.team.id, n:x.team.displayName || x.team.name}));
+      // Grafika: herby w kolejności z nazwy („gość at gospodarz”), w walkach flagi z walki wieczoru
+      const logoOf = x => x && x.team && (x.team.logo || ((x.team.logos || [])[0] || {}).href) || '';
+      const hm0 = (c.competitors || []).find(x => x.homeAway === 'home'), aw0 = (c.competitors || []).find(x => x.homeAway === 'away');
+      let img = hm0 && aw0 ? [logoOf(aw0), logoOf(hm0)] : [];
+      if (!img.filter(Boolean).length){
+        const mainFight = (e.competitions || [])[(e.competitions || []).length - 1] || {};
+        img = (mainFight.competitors || []).map(x => { const a = x.athlete || (x.athletes || [])[0] || {}; return (a.flag && a.flag.href) || ''; });
+      }
       const ath = [], fights = [];
       for (const cc of (e.competitions || [])){
         const fa = [];
@@ -207,7 +257,7 @@ const Sources = {
       }
       return {id:'espn:'+e.id, title:e.name || e.shortName, start, end:start + 2*36e5, allDay:false,
               loc:(c.venue && c.venue.fullName) || '', info:tv ? 'TV: '+tv : '', url:((e.links||[])[0]||{}).href || '',
-              res, part:{teams, ath, fights, comps:(e.competitions || []).length}};
+              res, img:img.filter(Boolean).length ? img : [], part:{teams, ath, fights, comps:(e.competitions || []).length}};
     };
     // Konkretna drużyna: pełny terminarz jednym zapytaniem
     if (sub.team){
@@ -228,12 +278,14 @@ const Sources = {
     if (/^(mma|racing)\//.test(sub.ref)){
       const from = new Date(Date.now() - DAY), to = new Date(Date.now() + S.set.horizon*DAY);
       const j = await getJSON(`${base}/scoreboard?limit=500&dates=${ymd(from)}-${ymd(to)}`);
+      sub.logo = ((((j.leagues || [])[0] || {}).logos || [])[0] || {}).href || sub.logo;
       return (j.events || []).map(map);
     }
     // Ligi drużynowe: ESPN ignoruje zakres i oddaje jeden dzień → pytamy dzień po dniu
     const days = Math.min(S.set.horizon, 45), out = {}; let okDays = 0, i = 0;
     const worker = async () => { while (i < days){ const d = new Date(Date.now() + (i++)*DAY);
-      try{ const j = await getJSON(`${base}/scoreboard?dates=${ymd(d)}`); okDays++; (j.events || []).forEach(e => out[e.id] = map(e)); }catch(_){} } };
+      try{ const j = await getJSON(`${base}/scoreboard?dates=${ymd(d)}`); okDays++;
+        if (!sub.logo) sub.logo = ((((j.leagues || [])[0] || {}).logos || [])[0] || {}).href || ''; (j.events || []).forEach(e => out[e.id] = map(e)); }catch(_){} } };
     await Promise.all([worker(), worker(), worker(), worker()]);
     if (!okDays) throw new Error('ESPN nie odpowiada dla ' + sub.ref);
     return Object.values(out);
@@ -269,6 +321,7 @@ const Sources = {
           const res = e.intHomeScore != null && e.intHomeScore !== '' && e.intAwayScore != null && e.intAwayScore !== ''
             ? `${e.strHomeTeam} ${e.intHomeScore}:${e.intAwayScore} ${e.strAwayTeam}` : '';
           return {id:'tsdb:'+e.idEvent, title:e.strEvent, start:ts, end:ts + (noTime ? DAY : 2*36e5), allDay:noTime, res,
+                  img:e.strHomeTeamBadge && e.strAwayTeamBadge ? [e.strHomeTeamBadge, e.strAwayTeamBadge] : [],
                   loc:[e.strVenue, e.strCity].filter(Boolean).join(', '),
                   info:(sub.yearly ? 'Runda ' : 'Kolejka ') + r + (e.strTVStation ? ' · TV: ' + e.strTVStation : ''), url:''};
         });
@@ -840,6 +893,7 @@ function evRow(e){
   return `<div class="card ev ${past ? 'past' : ''}" data-ev="${esc(e.key)}">
     <div class="bar" style="background:${s.color}"></div>
     <div class="t">${e.allDay ? 'cały<br>dzień' : hm(e.start)}</div>
+    ${visual(e, s)}
     <div class="m"><div class="n">${esc(e.title)}</div>
       <div class="s"><span class="tag">${esc(s.name)}</span>${f.mute ? '<span class="tag">🔕</span>' : ''}${esc(infoNoTv(e) || e.loc)}</div>
       ${e.start < Date.now() && e.res && S.set.results ? resLine(e) : tvLine(e)}${plBadge(e)}</div></div>`;
@@ -848,7 +902,15 @@ function evRow(e){
 function vUpcoming(){
   const list = visibleEvents().filter(e => e.end > Date.now() - 3*36e5);
   if (!S.subs.length){
-    $('#view').innerHTML = `<div class="empty"><p style="font-size:40px;margin:0">★</p><p>Nic jeszcze nie obserwujesz.</p>
+    $('#view').innerHTML = `<div class="empty"><svg viewBox="0 0 160 130" width="170" style="margin-bottom:6px">
+        <defs><linearGradient id="eg" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="#ff9a5c"/><stop offset=".55" stop-color="#ff5c8c"/><stop offset="1" stop-color="#b06eff"/></linearGradient></defs>
+        <rect x="30" y="22" width="100" height="92" rx="16" fill="none" stroke="url(#eg)" stroke-width="7"/>
+        <rect x="34" y="26" width="92" height="20" fill="url(#eg)" opacity=".9"/>
+        <rect x="52" y="12" width="8" height="22" rx="4" fill="#ff9a5c"/><rect x="100" y="12" width="8" height="22" rx="4" fill="#ff5c8c"/>
+        <path d="M80 58l5.6 11.4 12.6 1.8-9.1 8.9 2.1 12.5L80 86.7l-11.2 5.9 2.1-12.5-9.1-8.9 12.6-1.8z" fill="#ff9a5c"/>
+        <g fill="none" stroke="#5b9dff" stroke-width="2.5" opacity=".8"><circle cx="18" cy="96" r="9"/><path d="M18 87v18M9 96h18"/></g>
+        <g fill="none" stroke="#4cd6a0" stroke-width="2.5" opacity=".8"><circle cx="146" cy="40" r="8"/><path d="M140 34c3 3 3 9 0 12M152 34c-3 3-3 9 0 12"/></g>
+      </svg><p>Nic jeszcze nie obserwujesz.</p>
       <button class="btn acc" onclick="openAdd()">+ Dodaj co obserwować</button></div>`; return;
   }
   if (!list.length){ $('#view').innerHTML = `<div class="empty">Brak nadchodzących wydarzeń.<br><small>Odśwież albo sprawdź źródła w „Obserwowane”.</small></div>`; return; }
@@ -892,7 +954,7 @@ function vSubs(){
   const SRC = {fis:'FIS', espn:'ESPN', tsdb:'TheSportsDB', tsdbr:'TheSportsDB', tsdbs:'TheSportsDB', tsdbd:'TheSportsDB', ics:'Kalendarz ICS', manual:'Ręczne'};
   $('#view').innerHTML = `<button class="btn acc" style="width:100%;margin-bottom:12px" onclick="openAdd()">+ Dodaj co obserwować</button>` +
     (S.subs.map(s => `<div class="card" data-sub="${s.id}">
-      <div class="row"><span style="width:12px;height:12px;border-radius:50%;background:${s.color}"></span>
+      <div class="row">${s.logo ? `<div class="vis" style="width:30px;height:30px"><img src="${esc(s.logo)}" loading="lazy" onerror="this.style.visibility='hidden'"></div>` : `<div class="vis ico" style="width:30px;height:30px;color:${s.color};background:${s.color}22">${icon(sportOf(s), 18)}</div>`}
         <b style="flex:1">${esc(s.name)}</b><span class="tag">${SRC[s.src]}</span>
         <button class="btn sm" data-sync="${s.id}" ${busy.has(s.id) ? 'disabled' : ''}>${busy.has(s.id) ? '…' : '⟳'}</button></div>
       <div class="s" style="color:var(--mut);font-size:13px;margin-top:6px">
@@ -972,7 +1034,7 @@ window.onBack = () => { if ($('#sheet').style.display === 'block'){ closeSheet()
 
 function openEvent(key){
   const e = S.events[key]; if (!e) return; const s = subOf(e), f = S.flags[key] || {};
-  sheet(`<span class="tag" style="color:${s.color}">${esc(s.name)}</span><h2 style="margin-top:8px">${esc(e.title)}</h2>
+  sheet(`<div class="row">${visual(e, s, 52)}<span class="tag" style="color:${s.color}">${esc(s.name)}</span></div><h2 style="margin-top:8px">${esc(e.title)}</h2>
     <p>🗓 ${fmtTime(e)}${e.allDay ? ' (cały dzień)' : ''}</p>
     ${e.loc ? `<p>📍 ${esc(e.loc)}</p>` : ''}
     ${e.res ? `<p>🏁 <b>${esc(e.res)}</b></p>` : ''}
@@ -996,7 +1058,7 @@ function openAdd(){
   sheet(`<h2>Co obserwować?</h2>
     <label>Gotowe ligi i federacje</label>
     <div id="espnChips">${[...new Set(ESPN.map(x => x.g))].map(g => `<div style="color:var(--mut);font-size:12px;margin:10px 0 5px">${g}</div>
-      <div class="chips">${ESPN.map((x,i) => x.g === g ? `<button class="chip" data-i="${i}">${esc(x.n)}</button>` : '').join('')}</div>`).join('')}</div>
+      <div class="chips">${ESPN.map((x,i) => x.g === g ? `<button class="chip ic" data-i="${i}">${icon(sportOf({src:x.src || 'espn', ref:x.id || x.p}), 15)}${esc(x.n)}</button>` : '').join('')}</div>`).join('')}</div>
     <label>Filtr (opcjonalnie): drużyna, zawodnik, słowa po przecinku</label>
     <input id="flt" placeholder="np. Bayern, Legia  albo  Prochazka">
     <div class="row" style="margin-top:16px;border-top:1px solid var(--line);padding-top:12px">
