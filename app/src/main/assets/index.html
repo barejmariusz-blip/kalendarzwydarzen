@@ -174,7 +174,7 @@ function load(){
   return {v:1, subs:[], events:{}, flags:{}, set:{remind:[1440,60,0], tsdbKey:'123', horizon:60, lastSync:0}};
 }
 function migrate(s){
-  const d = {pl:false, plConf:false, plLineupNotify:true, plMaybe:true, plRemindMaybe:true, plNames:'Sochan', plClubs:'Kielce, Płock, Legia, Lech Poznań, Jagiellonia, Raków, Pogoń Szczecin, Górnik Zabrze'};
+  const d = {syncMin:180, syncWifi:false, pl:false, plConf:false, plLineupNotify:true, plMaybe:true, plRemindMaybe:true, plNames:'Sochan', plClubs:'Kielce, Płock, Legia, Lech Poznań, Jagiellonia, Raków, Pogoń Szczecin, Górnik Zabrze'};
   for (const k in d) if (s.set[k] === undefined) s.set[k] = d[k];
   for (const x of s.subs){
     if (!x.plMode || x.plMode === 'maybe') x.plMode = DOMESTIC.has(x.ref) || x.src === 'manual' ? 'always' : 'auto';
@@ -983,6 +983,13 @@ function vSettings(){
     <small>Pewne: polska liga, KSW, reprezentacja, Polak na karcie walk lub w drabince, polski klub. Standby: Polak w kadrze klubu, ale może nie zagrać. Nic nie jest zakładane z góry: tenis dopiero po publikacji drabinki, skoki dopiero po publikacji listy startowej FIS (zwykle 1–2 dni przed konkursem), kalendarze z linków tylko gdy w opisie jest nazwisko z listy „Moi zawodnicy”.</small></div>
   <div class="card"><b>Domyślne przypomnienia</b><div class="chips" style="margin-top:8px" id="remChips">${remChips(S.set.remind)}</div>
     <small>Dla nowych obserwowanych. Każde źródło można ustawić osobno.</small></div>
+  <div class="card"><b>🔄 Automatyczna synchronizacja</b>
+    <label>Co ile synchronizować w tle (także gdy apka jest zamknięta)</label>
+    <div class="chips" id="syC">${SYNC_OPTS.map(([m, l]) => `<button class="chip ${S.set.syncMin === m ? 'on' : ''}" data-m="${m}">${l}</button>`).join('')}</div>
+    <label>…albo własny czas w minutach (min. 15, 0 = wyłączona)</label>
+    <div class="row"><input type="number" id="syM" min="0" step="5" value="${S.set.syncMin}" style="flex:1"><button class="btn" id="syOk">Ustaw</button></div>
+    <div class="row" style="margin-top:10px"><button class="chip ${S.set.syncWifi ? 'on' : ''}" id="syW">📶 Tylko przez Wi-Fi</button></div>
+    <small>${S.set.syncMin > 0 ? 'Synchronizacja co ' + fmtMin(S.set.syncMin) + (S.set.syncWifi ? ', tylko Wi-Fi' : '') + '. Android może ją przesunąć o kilka minut, żeby oszczędzać baterię.' : 'Wyłączona — odświeżanie tylko przy otwarciu apki i ręcznie.'}</small></div>
   <div class="card"><b>Zakres pobierania</b>
     <label>Ile dni do przodu</label><input type="number" id="hor" value="${S.set.horizon}" min="7" max="365"></div>
   <div class="card"><b>TheSportsDB – klucz API</b>
@@ -992,7 +999,7 @@ function vSettings(){
     <button class="btn sm" id="exp">Eksport kopii</button>
     <label class="btn sm" style="margin:0;color:var(--tx)">Import kopii<input type="file" id="imp" accept=".json,application/json" style="display:none"></label>
     <button class="btn sm" id="tst">Test powiadomienia</button></div>
-    <small>Ostatnia synchronizacja: ${S.set.lastSync ? new Date(S.set.lastSync).toLocaleString('pl-PL') : 'nigdy'} · w tle co ~3 h (gdy jest internet)</small></div>
+    <small>Ostatnia synchronizacja: ${S.set.lastSync ? new Date(S.set.lastSync).toLocaleString('pl-PL') : 'nigdy'}</small></div>
   <p style="text-align:center"><small>Kalendarz Wydarzeń · szkic v0.1</small></p>`;
   bindRemChips($('#remChips'), S.set.remind, v => { S.set.remind = v; save(); });
   $('#plOn').onclick = () => $('#plBtn').click();
@@ -1005,6 +1012,11 @@ function vSettings(){
   $('#plRm').onclick = () => { S.set.plRemindMaybe = !S.set.plRemindMaybe; save(); reschedule(); render(); };
   $('#plN').onchange = e => { S.set.plNames = e.target.value; save(); if (S.set.pl) syncAll(true); };
   $('#plC').onchange = e => { S.set.plClubs = e.target.value; save(); if (S.set.pl) syncAll(true); };
+  const applySync = m => { S.set.syncMin = m <= 0 ? 0 : Math.max(15, Math.round(m)); save(); pushSync(); render();
+    toast(S.set.syncMin ? 'Synchronizacja co ' + fmtMin(S.set.syncMin) : 'Automatyczna synchronizacja wyłączona'); };
+  $('#syC').onclick = e => { const b = e.target.closest('[data-m]'); if (b) applySync(+b.dataset.m); };
+  $('#syOk').onclick = () => applySync(+$('#syM').value || 0);
+  $('#syW').onclick = () => { S.set.syncWifi = !S.set.syncWifi; save(); pushSync(); render(); };
   $('#hor').onchange = e => { S.set.horizon = Math.max(7, Math.min(365, +e.target.value || 60)); save(); };
   $('#tkey').onchange = e => { S.set.tsdbKey = e.target.value.trim() || '123'; save(); };
   $('#exp').onclick = () => {
@@ -1017,6 +1029,10 @@ function vSettings(){
   $('#tst').onclick = () => { if (window.Android && Android.test) Android.test('⏰ Test', 'Tak będzie wyglądać przypomnienie'); else toast('Tylko w apce'); };
 }
 
+const SYNC_OPTS = [[15,'15 min'],[30,'30 min'],[60,'1 h'],[120,'2 h'],[180,'3 h'],[360,'6 h'],[720,'12 h'],[1440,'24 h'],[0,'wyłączona']];
+const fmtMin = m => m % 60 === 0 ? (m / 60) + ' h' : m > 60 ? Math.floor(m / 60) + ' h ' + (m % 60) + ' min' : m + ' min';
+const staleMs = () => Math.min(S.set.syncMin || 180, 180) * 6e4;   // przy otwarciu: odśwież, jeśli dane starsze niż interwał (max 3 h)
+function pushSync(){ try{ if (window.Android && Android.setSync) Android.setSync(S.set.syncMin, !!S.set.syncWifi); }catch(_){} }
 const REM_OPTS = [10080, 2880, 1440, 360, 120, 60, 30, 15, 0];
 const remLabel = m => m === 0 ? 'na start' : fmtOff(m) + ' przed';
 const remChips = cur => REM_OPTS.map(m => `<button class="chip ${cur.includes(m) ? 'on' : ''}" data-m="${m}">${remLabel(m)}</button>`).join('');
@@ -1184,7 +1200,7 @@ $('#plBtn').onclick = () => {
   toast(S.set.pl ? 'Tylko wydarzenia z Polakami' : 'Wszystkie wydarzenia');
   if (S.set.pl && plNeedsData()) syncAll(true);   // pierwsze włączenie: dociągnij składy
 };
-window.onNativeResume = () => { S = migrate(load()); if (Date.now() - S.set.lastSync > 3*36e5 && S.subs.length) syncAll(); else { render(); checkLineups(); } };
+window.onNativeResume = () => { S = migrate(load()); if (Date.now() - S.set.lastSync > staleMs() && S.subs.length) syncAll(); else { render(); checkLineups(); } };
 
 /* Bezpiecznik: apka padła w trakcie pobierania źródła → wstrzymaj to źródło, nie pobieraj automatycznie */
 let CRASHED = null;
@@ -1205,6 +1221,7 @@ if (BG){
   })();
 } else {
   render();
+  pushSync();
   // Ostatni błąd aplikacji (zapisany przy awarii) — do przekazania
   try{
     const crash = (window.Android && Android.lastCrash ? Android.lastCrash() : '') + (CRASHED ? '\nPadło podczas pobierania: ' + CRASHED.name + ' (źródło wstrzymane — wznowisz je w Obserwowane)' : '');
@@ -1214,7 +1231,7 @@ if (BG){
       <div class="row" style="margin-top:10px"><button class="btn acc" onclick="closeSheet()">OK</button></div>`);
   }catch(_){}
   if (window.Android && Android.notifyState && Android.notifyState() === 'ask') Android.askNotify();
-  if (!SAFE && S.subs.length && Date.now() - S.set.lastSync > 3*36e5) setTimeout(() => syncAll(), 1500);
+  if (!SAFE && S.subs.length && Date.now() - S.set.lastSync > staleMs()) setTimeout(() => syncAll(), 1500);
 }
 </script>
 </body>

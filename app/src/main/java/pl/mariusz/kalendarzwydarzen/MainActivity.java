@@ -250,6 +250,12 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void notifyNow(String title, String body) { Alarms.notify(MainActivity.this, 140 + (notifSlot++ % 20), title, body); }
 
+        /** Automatyczna synchronizacja: co ile minut (0 = wyłączona) i czy tylko Wi-Fi. */
+        @JavascriptInterface
+        public void setSync(int minutes, boolean wifi) {
+            try { BgSync.configure(MainActivity.this, minutes, wifi); } catch (Throwable t) { Net.note(MainActivity.this, "setSync: " + t); }
+        }
+
         @JavascriptInterface
         public void test(String title, String body) { Alarms.notify(MainActivity.this, 99, title, body); }
     }

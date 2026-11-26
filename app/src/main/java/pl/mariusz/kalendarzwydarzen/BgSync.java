@@ -39,14 +39,31 @@ public class BgSync extends JobService {
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService net = Executors.newFixedThreadPool(3);
 
+    /**
+     * Planuje synchronizację wg ustawień: co ile minut (0 = wyłączona, minimum 15 — limit Androida)
+     * i czy tylko przez Wi-Fi. Gdy ustawienia się nie zmieniły, zostawia istniejące zadanie.
+     */
     static void schedule(Context c) {
         JobScheduler js = c.getSystemService(JobScheduler.class);
-        if (js == null || js.getPendingJob(JOB_ID) != null) return;
+        if (js == null) return;
+        int minutes = Alarms.prefs(c).getInt("syncMin", 180);
+        boolean wifi = Alarms.prefs(c).getBoolean("syncWifi", false);
+        if (minutes <= 0) { js.cancel(JOB_ID); return; }
+        minutes = Math.max(15, minutes);
+        long period = minutes * 60000L;
+        int net = wifi ? JobInfo.NETWORK_TYPE_UNMETERED : JobInfo.NETWORK_TYPE_ANY;
+        JobInfo cur = js.getPendingJob(JOB_ID);
+        if (cur != null && cur.getIntervalMillis() == period && cur.getNetworkType() == net) return;
         js.schedule(new JobInfo.Builder(JOB_ID, new ComponentName(c, BgSync.class))
-                .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
-                .setPeriodic(3 * 60 * 60 * 1000L, 30 * 60 * 1000L)
+                .setRequiredNetworkType(net)
+                .setPeriodic(period, Math.max(5 * 60000L, period / 6))
                 .setPersisted(true)
                 .build());
+    }
+
+    static void configure(Context c, int minutes, boolean wifi) {
+        Alarms.prefs(c).edit().putInt("syncMin", minutes).putBoolean("syncWifi", wifi).apply();
+        schedule(c);
     }
 
     @Override
