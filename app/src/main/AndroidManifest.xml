@@ -29,6 +29,7 @@
 
         <receiver android:name=".AlarmReceiver" android:exported="false" />
         <receiver android:name=".Lineups" android:exported="false" />
+        <receiver android:name=".PreSync" android:exported="false" />
         <service android:name=".BgSync" android:exported="false"
             android:permission="android.permission.BIND_JOB_SERVICE" />
         <receiver android:name=".EventsWidget" android:exported="false" android:label="Kalendarz Wydarzeń">

@@ -250,6 +250,10 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void notifyNow(String title, String body) { Alarms.notify(MainActivity.this, 140 + (notifSlot++ % 20), title, body); }
 
+        /** Synchronizacja przed najbliższym wydarzeniem (czas w ms, 0 = brak). */
+        @JavascriptInterface
+        public void preSync(double at) { try { BgSync.preSyncAt(MainActivity.this, (long) at); } catch (Throwable t) { Net.note(MainActivity.this, "preSync: " + t); } }
+
         /** Automatyczna synchronizacja: co ile minut (0 = wyłączona) i czy tylko Wi-Fi. */
         @JavascriptInterface
         public void setSync(int minutes, boolean wifi) {

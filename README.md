@@ -43,7 +43,7 @@ Drugi przycisk obok „Polacy”. Zostaje tylko to, co jest już przesądzone: P
 
 ## Synchronizacja w tle i powiadomienia o zmianach
 
-Apka sama odświeża wszystkie źródła co ustawiony czas (Ustawienia → Automatyczna synchronizacja: 15 min–24 h, własna liczba minut albo wyłączona, opcjonalnie tylko przez Wi-Fi; domyślnie 3 h), także gdy jest zamknięta i po restarcie telefonu. Uruchamia tę samą logikę co na ekranie (`index.html?bg=1` w niewidocznym WebView). Po każdym odświeżeniu porównuje stan z poprzednim (21 dni do przodu) i wysyła powiadomienia:
+Apka sama odświeża wszystkie źródła co ustawiony czas (Ustawienia → Automatyczna synchronizacja: 1–24 h, własna liczba minut albo wyłączona, opcjonalnie tylko przez Wi-Fi; domyślnie 6 h) oraz **dodatkowo ok. 30 min przed każdym śledzonym wydarzeniem**: budzik na najbliższe wydarzenie uruchamia jednorazowe odświeżenie, a ono ustawia budzik na kolejne, także gdy jest zamknięta i po restarcie telefonu. Uruchamia tę samą logikę co na ekranie (`index.html?bg=1` w niewidocznym WebView). Po każdym odświeżeniu porównuje stan z poprzednim (21 dni do przodu) i wysyła powiadomienia:
 
 - 🕒 **zmiana terminu** (przesunięcie o co najmniej 5 minut) albo **ogłoszona godzina**,
 - ❌ **wydarzenie zniknęło** (odwołane lub przeniesione), z wyjątkiem lig ESPN pobieranych dzień po dniu, gdzie brak meczu nie oznacza odwołania,

@@ -174,7 +174,7 @@ function load(){
   return {v:1, subs:[], events:{}, flags:{}, set:{remind:[1440,60,0], tsdbKey:'123', horizon:60, lastSync:0}};
 }
 function migrate(s){
-  const d = {syncMin:180, syncWifi:false, pl:false, plConf:false, plLineupNotify:true, plMaybe:true, plRemindMaybe:true, plNames:'Sochan', plClubs:'Kielce, Płock, Legia, Lech Poznań, Jagiellonia, Raków, Pogoń Szczecin, Górnik Zabrze'};
+  const d = {syncMin:360, syncWifi:false, preSync:true, preSyncMin:30, pl:false, plConf:false, plLineupNotify:true, plMaybe:true, plRemindMaybe:true, plNames:'Sochan', plClubs:'Kielce, Płock, Legia, Lech Poznań, Jagiellonia, Raków, Pogoń Szczecin, Górnik Zabrze'};
   for (const k in d) if (s.set[k] === undefined) s.set[k] = d[k];
   for (const x of s.subs){
     if (!x.plMode || x.plMode === 'maybe') x.plMode = DOMESTIC.has(x.ref) || x.src === 'manual' ? 'always' : 'auto';
@@ -830,6 +830,15 @@ function reschedule(){
   watch.sort((a,b) => a.at - b.at);
   if (window.Android && Android.lineupWatch) Android.lineupWatch(JSON.stringify(watch.slice(0,24)));
   publishWidget();
+  // Synchronizacja ~30 min przed najbliższym śledzonym wydarzeniem (świeże godziny, karty, listy startowe, składy)
+  let pre = 0;
+  if (S.set.preSync !== false){
+    const lead = (S.set.preSyncMin || 30) * 6e4;
+    const next = visibleEvents().filter(e => !(S.flags[e.key] || {}).mute && !e.allDay && e.start - lead > now + 6e4).sort((a,b) => a.start - b.start)[0];
+    if (next) pre = next.start - lead;
+  }
+  S.set.preSyncNext = pre;
+  try{ if (window.Android && Android.preSync) Android.preSync(pre); }catch(_){}
 }
 const fmtOff = m => m >= 1440 ? (m/1440) + (m === 1440 ? ' dzień' : ' dni') : m >= 60 ? (m/60) + ' h' : m + ' min';
 
@@ -988,7 +997,9 @@ function vSettings(){
     <div class="chips" id="syC">${SYNC_OPTS.map(([m, l]) => `<button class="chip ${S.set.syncMin === m ? 'on' : ''}" data-m="${m}">${l}</button>`).join('')}</div>
     <label>…albo własny czas w minutach (min. 15, 0 = wyłączona)</label>
     <div class="row"><input type="number" id="syM" min="0" step="5" value="${S.set.syncMin}" style="flex:1"><button class="btn" id="syOk">Ustaw</button></div>
-    <div class="row" style="margin-top:10px"><button class="chip ${S.set.syncWifi ? 'on' : ''}" id="syW">📶 Tylko przez Wi-Fi</button></div>
+    <div class="row" style="margin-top:10px"><button class="chip ${S.set.preSync !== false ? 'on' : ''}" id="syP">⏱ Dodatkowo ${S.set.preSyncMin || 30} min przed każdym wydarzeniem</button>
+      <button class="chip ${S.set.syncWifi ? 'on' : ''}" id="syW">📶 Tylko przez Wi-Fi</button></div>
+    ${S.set.preSync !== false && S.set.preSyncNext ? `<small>Najbliższa synchronizacja przed wydarzeniem: ${new Date(S.set.preSyncNext).toLocaleString('pl-PL', {weekday:'short', day:'numeric', month:'numeric', hour:'2-digit', minute:'2-digit'})}</small><br>` : ''}
     <small>${S.set.syncMin > 0 ? 'Synchronizacja co ' + fmtMin(S.set.syncMin) + (S.set.syncWifi ? ', tylko Wi-Fi' : '') + '. Android może ją przesunąć o kilka minut, żeby oszczędzać baterię.' : 'Wyłączona — odświeżanie tylko przy otwarciu apki i ręcznie.'}</small></div>
   <div class="card"><b>Zakres pobierania</b>
     <label>Ile dni do przodu</label><input type="number" id="hor" value="${S.set.horizon}" min="7" max="365"></div>
@@ -1016,6 +1027,7 @@ function vSettings(){
     toast(S.set.syncMin ? 'Synchronizacja co ' + fmtMin(S.set.syncMin) : 'Automatyczna synchronizacja wyłączona'); };
   $('#syC').onclick = e => { const b = e.target.closest('[data-m]'); if (b) applySync(+b.dataset.m); };
   $('#syOk').onclick = () => applySync(+$('#syM').value || 0);
+  $('#syP').onclick = () => { S.set.preSync = S.set.preSync === false; save(); reschedule(); render(); };
   $('#syW').onclick = () => { S.set.syncWifi = !S.set.syncWifi; save(); pushSync(); render(); };
   $('#hor').onchange = e => { S.set.horizon = Math.max(7, Math.min(365, +e.target.value || 60)); save(); };
   $('#tkey').onchange = e => { S.set.tsdbKey = e.target.value.trim() || '123'; save(); };
@@ -1029,7 +1041,7 @@ function vSettings(){
   $('#tst').onclick = () => { if (window.Android && Android.test) Android.test('⏰ Test', 'Tak będzie wyglądać przypomnienie'); else toast('Tylko w apce'); };
 }
 
-const SYNC_OPTS = [[15,'15 min'],[30,'30 min'],[60,'1 h'],[120,'2 h'],[180,'3 h'],[360,'6 h'],[720,'12 h'],[1440,'24 h'],[0,'wyłączona']];
+const SYNC_OPTS = [[60,'1 h'],[120,'2 h'],[180,'3 h'],[360,'6 h'],[480,'8 h'],[720,'12 h'],[1440,'24 h'],[0,'wyłączona']];
 const fmtMin = m => m % 60 === 0 ? (m / 60) + ' h' : m > 60 ? Math.floor(m / 60) + ' h ' + (m % 60) + ' min' : m + ' min';
 const staleMs = () => Math.min(S.set.syncMin || 180, 180) * 6e4;   // przy otwarciu: odśwież, jeśli dane starsze niż interwał (max 3 h)
 function pushSync(){ try{ if (window.Android && Android.setSync) Android.setSync(S.set.syncMin, !!S.set.syncWifi); }catch(_){} }

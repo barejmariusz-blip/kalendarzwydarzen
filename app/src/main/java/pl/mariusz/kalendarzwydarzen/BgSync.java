@@ -46,7 +46,7 @@ public class BgSync extends JobService {
     static void schedule(Context c) {
         JobScheduler js = c.getSystemService(JobScheduler.class);
         if (js == null) return;
-        int minutes = Alarms.prefs(c).getInt("syncMin", 180);
+        int minutes = Alarms.prefs(c).getInt("syncMin", 360);
         boolean wifi = Alarms.prefs(c).getBoolean("syncWifi", false);
         if (minutes <= 0) { js.cancel(JOB_ID); return; }
         minutes = Math.max(15, minutes);
@@ -59,6 +59,33 @@ public class BgSync extends JobService {
                 .setPeriodic(period, Math.max(5 * 60000L, period / 6))
                 .setPersisted(true)
                 .build());
+    }
+
+    static final int JOB_ONCE = 4243;
+
+    /** Jednorazowa synchronizacja „teraz” (gdy tylko będzie internet) — używana 30 min przed wydarzeniem. */
+    static void runOnce(Context c) {
+        JobScheduler js = c.getSystemService(JobScheduler.class);
+        if (js == null) return;
+        boolean wifi = Alarms.prefs(c).getBoolean("syncWifi", false);
+        js.schedule(new JobInfo.Builder(JOB_ONCE, new ComponentName(c, BgSync.class))
+                .setRequiredNetworkType(wifi ? JobInfo.NETWORK_TYPE_UNMETERED : JobInfo.NETWORK_TYPE_ANY)
+                .setOverrideDeadline(10 * 60000L)
+                .build());
+    }
+
+    /** Budzik na synchronizację przed najbliższym wydarzeniem (at = 0 → brak). */
+    static void preSyncAt(Context c, long at) {
+        Alarms.prefs(c).edit().putLong("preSyncAt", at).apply();
+        android.app.AlarmManager am = (android.app.AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
+        if (am == null) return;
+        android.content.Intent i = new android.content.Intent(c, PreSync.class).setAction("kw.presync");
+        android.app.PendingIntent pi = android.app.PendingIntent.getBroadcast(c, 950, i,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT | android.app.PendingIntent.FLAG_IMMUTABLE);
+        am.cancel(pi);
+        if (at <= System.currentTimeMillis()) return;
+        if (android.os.Build.VERSION.SDK_INT >= 31 && !am.canScheduleExactAlarms()) am.setAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, at, pi);
+        else am.setExactAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, at, pi);
     }
 
     static void configure(Context c, int minutes, boolean wifi) {
@@ -145,6 +172,9 @@ public class BgSync extends JobService {
 
         @JavascriptInterface
         public boolean exactOk() { return true; }
+
+        @JavascriptInterface
+        public void preSync(double at) { BgSync.preSyncAt(BgSync.this, (long) at); }
 
         @JavascriptInterface
         public void bgDone() { finish(false); }
